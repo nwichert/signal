@@ -1,0 +1,43 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users can read/write their own profile
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Vision - anyone authenticated can read, only CPO can write
+    match /vision/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'cpo';
+    }
+
+    // Focus Areas - anyone authenticated can read, team/CPO can write
+    match /focusAreas/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['cpo', 'team'];
+    }
+
+    // Hypotheses - team/CPO can read/write
+    match /hypotheses/{docId} {
+      allow read, write: if request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['cpo', 'team'];
+    }
+
+    // Changelog - team/CPO can read/write
+    match /changelog/{docId} {
+      allow read, write: if request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['cpo', 'team'];
+    }
+
+    // Feedback, Insights, Blockers - team/CPO access
+    match /{collection}/{docId} {
+      allow read, write: if request.auth != null &&
+        collection in ['feedback', 'insights', 'blockers'] &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['cpo', 'team'];
+    }
+  }
+}
