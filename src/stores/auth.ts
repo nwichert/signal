@@ -31,8 +31,8 @@ export const useAuthStore = defineStore('auth', () => {
   // Check if user can edit content (CPO or team member)
   const canEdit = computed(() => isCPO.value || isTeam.value)
 
-  // Check if user is CPO (can edit vision, principles, etc.)
-  const canEditVision = computed(() => isCPO.value)
+  // Check if user can edit vision, principles, etc. (team or CPO)
+  const canEditVision = computed(() => isCPO.value || isTeam.value)
 
   async function fetchUserProfile(uid: string): Promise<User | null> {
     try {

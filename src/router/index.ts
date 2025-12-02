@@ -78,6 +78,18 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/DocumentsView.vue'),
         meta: { title: 'Documents', roles: ['cpo', 'team'] },
       },
+      {
+        path: 'idea-hopper',
+        name: 'IdeaHopper',
+        component: () => import('@/views/IdeaHopperView.vue'),
+        meta: { title: 'Idea Hopper', roles: ['cpo', 'team'] },
+      },
+      {
+        path: 'journey-maps',
+        name: 'JourneyMaps',
+        component: () => import('@/views/JourneyMapsView.vue'),
+        meta: { title: 'Journey Maps', roles: ['cpo', 'team'] },
+      },
     ],
   },
   {

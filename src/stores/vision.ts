@@ -51,7 +51,7 @@ export const useVisionStore = defineStore('vision', () => {
     }
   }
 
-  async function saveVision(data: { mission: string; vision: string; principles: Principle[] }) {
+  async function saveVision(data: { companyUrl?: string; coreBusinessModel?: string; mission: string; vision: string; principles: Principle[] }) {
     const authStore = useAuthStore()
     if (!authStore.canEditVision) {
       throw new Error('Not authorized to edit vision')
@@ -79,6 +79,8 @@ export const useVisionStore = defineStore('vision', () => {
   async function addPrinciple(title: string, description: string) {
     if (!vision.value) {
       await saveVision({
+        companyUrl: '',
+        coreBusinessModel: '',
         mission: '',
         vision: '',
         principles: [{ id: crypto.randomUUID(), order: 0, title, description }],
@@ -94,6 +96,8 @@ export const useVisionStore = defineStore('vision', () => {
     }
 
     await saveVision({
+      companyUrl: vision.value.companyUrl || '',
+      coreBusinessModel: vision.value.coreBusinessModel || '',
       mission: vision.value.mission || '',
       vision: vision.value.vision || '',
       principles: [...(vision.value.principles || []), newPrinciple],
@@ -108,6 +112,8 @@ export const useVisionStore = defineStore('vision', () => {
     )
 
     await saveVision({
+      companyUrl: vision.value.companyUrl || '',
+      coreBusinessModel: vision.value.coreBusinessModel || '',
       mission: vision.value.mission || '',
       vision: vision.value.vision || '',
       principles,
@@ -122,6 +128,8 @@ export const useVisionStore = defineStore('vision', () => {
       .map((p, index) => ({ ...p, order: index }))
 
     await saveVision({
+      companyUrl: vision.value.companyUrl || '',
+      coreBusinessModel: vision.value.coreBusinessModel || '',
       mission: vision.value.mission || '',
       vision: vision.value.vision || '',
       principles,
@@ -132,6 +140,8 @@ export const useVisionStore = defineStore('vision', () => {
     if (!vision.value) return
 
     await saveVision({
+      companyUrl: vision.value.companyUrl || '',
+      coreBusinessModel: vision.value.coreBusinessModel || '',
       mission: vision.value.mission || '',
       vision: vision.value.vision || '',
       principles: principles.map((p, index) => ({ ...p, order: index })),
