@@ -90,6 +90,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/JourneyMapsView.vue'),
         meta: { title: 'Journey Maps', roles: ['cpo', 'team'] },
       },
+      {
+        path: 'customer-archetypes',
+        name: 'CustomerArchetypes',
+        component: () => import('@/views/CustomerArchetypesView.vue'),
+        meta: { title: 'Customer Archetypes', roles: ['cpo', 'team'] },
+      },
     ],
   },
   {

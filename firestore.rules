@@ -69,6 +69,18 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['cpo', 'team'];
     }
 
+    // Customer Archetypes - team/CPO can read/write
+    match /customerArchetypes/{docId} {
+      allow read, write: if request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['cpo', 'team'];
+    }
+
+    // Archetype Projects - team/CPO can read/write
+    match /archetypeProjects/{docId} {
+      allow read, write: if request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['cpo', 'team'];
+    }
+
     // Feedback, Insights, Blockers - team/CPO access
     match /{collection}/{docId} {
       allow read, write: if request.auth != null &&

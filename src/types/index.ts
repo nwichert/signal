@@ -242,6 +242,109 @@ export interface Idea {
   createdBy: string
 }
 
+// Customer Archetypes - Steve Blank Customer Discovery
+export type StakeholderRole = 'user' | 'payer' | 'economic_buyer' | 'decision_maker' | 'influencer' | 'recommender' | 'saboteur'
+export type ArchetypePhase = 'setup' | 'hypothesis' | 'interview_prep' | 'synthesis' | 'validated'
+export type ValidationStatus = 'hypothesis' | 'partially_validated' | 'validated' | 'invalidated'
+
+export interface ArchetypeHypothesis {
+  id: string
+  content: string
+  status: ValidationStatus
+  validatedAt?: Timestamp
+  evidence?: string
+}
+
+export interface InterviewNote {
+  id: string
+  date: Timestamp
+  interviewee: string
+  role: string
+  rawNotes: string
+  keyInsights: string[]
+  surprises: string[]
+  contradictions: string[]
+  validatedHypotheses: string[]  // hypothesis IDs
+  invalidatedHypotheses: string[] // hypothesis IDs
+  createdAt: Timestamp
+}
+
+export interface InterviewQuestion {
+  id: string
+  question: string
+  purpose: string
+  hypothesisId?: string  // which hypothesis this validates
+}
+
+export interface CustomerArchetype {
+  id: string
+  // Basic Info
+  name: string
+  stakeholderRole: StakeholderRole
+  customRoleName?: string  // for custom personality types beyond the 7 primary
+  phase: ArchetypePhase
+
+  // Profile (Who they are)
+  jobTitle: string
+  dailyReality: string
+  background: string
+  demographics?: string
+
+  // Problems (Their pains)
+  problemStatement: string
+  specificPainPoints: ArchetypeHypothesis[]
+  currentSolutions: ArchetypeHypothesis[]  // How they solve it today (workarounds)
+
+  // Goals & Metrics (How they're measured)
+  primaryGoals: ArchetypeHypothesis[]
+  successMetrics: ArchetypeHypothesis[]
+
+  // Buying Process (Who decides)
+  budgetAuthority: ValidationStatus
+  decisionProcess: string
+  buyingCriteria: ArchetypeHypothesis[]
+  objections: ArchetypeHypothesis[]
+
+  // Value Proposition Mapping
+  valuePropositions: ValuePropositionMap[]
+
+  // Interview Tracking
+  interviewQuestions: InterviewQuestion[]
+  interviewNotes: InterviewNote[]
+  interviewTarget: number  // target number of interviews
+
+  // Validation
+  confidenceScore: number  // 0-100, calculated from validated hypotheses
+  readinessScore: number   // 0-100, interview readiness
+  bsFlags: string[]        // marketing speak that needs validation
+
+  // Meta
+  status: 'draft' | 'active' | 'validated' | 'archived'
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  createdBy: string
+}
+
+export interface ValuePropositionMap {
+  id: string
+  proposition: string
+  relevanceScore: 1 | 2 | 3 | 4 | 5  // how relevant to this archetype
+  painAddressed: string  // which pain point this addresses
+  status: ValidationStatus
+  evidence?: string
+}
+
+export interface ArchetypeProject {
+  id: string
+  name: string
+  productContext: string
+  businessModel: string
+  archetypeIds: string[]
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  createdBy: string
+}
+
 // Journey Maps
 export type ExperienceLevel = 1 | 2 | 3 | 4 | 5
 
