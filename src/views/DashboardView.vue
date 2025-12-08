@@ -6,6 +6,12 @@ import { useFocusAreasStore } from '@/stores/focusAreas'
 import { useDiscoveryStore } from '@/stores/discovery'
 import { useDeliveryStore } from '@/stores/delivery'
 import { useVisionStore } from '@/stores/vision'
+import { useCustomerArchetypesStore } from '@/stores/customerArchetypes'
+import { useIdeasStore } from '@/stores/ideas'
+import { useObjectivesStore } from '@/stores/objectives'
+import { useDecisionsStore } from '@/stores/decisions'
+import { useJourneyMapsStore } from '@/stores/journeyMaps'
+import { useRelatedItems } from '@/composables/useRelatedItems'
 import type { ConfidenceLevel } from '@/types'
 
 const authStore = useAuthStore()
@@ -13,10 +19,21 @@ const focusAreasStore = useFocusAreasStore()
 const discoveryStore = useDiscoveryStore()
 const deliveryStore = useDeliveryStore()
 const visionStore = useVisionStore()
+const archetypesStore = useCustomerArchetypesStore()
+const ideasStore = useIdeasStore()
+const objectivesStore = useObjectivesStore()
+const decisionsStore = useDecisionsStore()
+const journeyMapsStore = useJourneyMapsStore()
+const { getConnectionCounts, getAlignmentWarnings } = useRelatedItems()
 
 const loading = computed(() =>
-  focusAreasStore.loading || discoveryStore.loading || deliveryStore.loading || visionStore.loading
+  focusAreasStore.loading || discoveryStore.loading || deliveryStore.loading || visionStore.loading ||
+  archetypesStore.loading || ideasStore.loading || objectivesStore.loading || decisionsStore.loading
 )
+
+// Connection statistics
+const connectionStats = computed(() => getConnectionCounts())
+const alignmentWarnings = computed(() => getAlignmentWarnings())
 
 // Calculate validated this week
 const validatedThisWeek = computed(() => {
@@ -41,6 +58,11 @@ onMounted(() => {
   discoveryStore.subscribe()
   deliveryStore.subscribe()
   visionStore.subscribe()
+  archetypesStore.subscribe()
+  ideasStore.subscribe()
+  objectivesStore.subscribe()
+  decisionsStore.subscribe()
+  journeyMapsStore.subscribe()
 })
 
 onUnmounted(() => {
@@ -48,6 +70,11 @@ onUnmounted(() => {
   discoveryStore.unsubscribe()
   deliveryStore.unsubscribe()
   visionStore.unsubscribe()
+  archetypesStore.unsubscribe()
+  ideasStore.unsubscribe()
+  objectivesStore.unsubscribe()
+  decisionsStore.unsubscribe()
+  journeyMapsStore.unsubscribe()
 })
 
 function getConfidenceBadgeClass(level: ConfidenceLevel) {
@@ -164,12 +191,99 @@ function formatDate(timestamp: { toDate: () => Date } | null) {
         </div>
       </RouterLink>
 
+      <!-- Alignment Status Panel - Command Center -->
+      <div v-if="authStore.canViewTeamContent && alignmentWarnings.length > 0" class="card p-4 border-l-4 border-l-amber-400">
+        <div class="flex items-center gap-2 mb-3">
+          <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+          </svg>
+          <h3 class="text-sm font-medium text-gray-900">Alignment Status</h3>
+          <span class="text-xs text-gray-400">({{ alignmentWarnings.length }} items need attention)</span>
+        </div>
+        <div class="space-y-2">
+          <RouterLink
+            v-for="(warning, index) in alignmentWarnings.slice(0, 4)"
+            :key="index"
+            :to="warning.path"
+            class="flex items-center gap-3 p-2 rounded-lg hover:bg-amber-50 transition-colors"
+          >
+            <svg
+              :class="[
+                'w-4 h-4 flex-shrink-0',
+                warning.type === 'warning' ? 'text-amber-500' : 'text-blue-500'
+              ]"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                v-if="warning.type === 'warning'"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+              <path
+                v-else
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <span class="text-sm text-gray-700">{{ warning.message }}</span>
+            <svg class="w-4 h-4 text-gray-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+            </svg>
+          </RouterLink>
+          <div v-if="alignmentWarnings.length > 4" class="text-xs text-gray-400 text-center pt-2">
+            +{{ alignmentWarnings.length - 4 }} more items to review
+          </div>
+        </div>
+      </div>
+
+      <!-- Connection Statistics Panel -->
+      <div v-if="authStore.canViewTeamContent" class="card p-4">
+        <div class="flex items-center gap-2 mb-4">
+          <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+          </svg>
+          <h3 class="text-sm font-medium text-gray-900">Data Connectivity Overview</h3>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div class="text-center">
+            <div class="text-2xl font-semibold text-purple-600">{{ connectionStats.archetypesWithFocusAreas }}</div>
+            <div class="text-xs text-gray-500">Archetypes with Focus Areas</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-semibold text-blue-600">{{ connectionStats.hypothesesWithArchetypes }}</div>
+            <div class="text-xs text-gray-500">Hypotheses with Archetypes</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-semibold text-green-600">{{ connectionStats.objectivesWithFocusAreas }}</div>
+            <div class="text-xs text-gray-500">OKRs aligned to Focus</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-semibold text-indigo-600">{{ connectionStats.decisionsWithEvidence }}</div>
+            <div class="text-xs text-gray-500">Evidence-Based Decisions</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Stats grid -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <RouterLink to="/focus-areas" class="card p-4 hover:border-gray-300 transition-colors">
-          <div class="text-sm font-medium text-gray-500">Active Focus Areas</div>
+          <div class="text-xs font-medium text-gray-500">Focus Areas</div>
           <div class="text-2xl font-semibold text-gray-900 mt-1">
             {{ focusAreasStore.activeFocusAreas.length }}
+          </div>
+        </RouterLink>
+
+        <RouterLink to="/customer-archetypes" class="card p-4 hover:border-gray-300 transition-colors">
+          <div class="text-xs font-medium text-gray-500">Archetypes</div>
+          <div class="text-2xl font-semibold text-purple-600 mt-1">
+            {{ archetypesStore.activeArchetypes.length }}
           </div>
         </RouterLink>
 
@@ -178,14 +292,21 @@ function formatDate(timestamp: { toDate: () => Date } | null) {
           to="/discovery"
           class="card p-4 hover:border-gray-300 transition-colors"
         >
-          <div class="text-sm font-medium text-gray-500">Active Hypotheses</div>
-          <div class="text-2xl font-semibold text-gray-900 mt-1">
+          <div class="text-xs font-medium text-gray-500">Hypotheses</div>
+          <div class="text-2xl font-semibold text-yellow-600 mt-1">
             {{ discoveryStore.activeHypotheses.length }}
           </div>
         </RouterLink>
 
+        <RouterLink to="/idea-hopper" class="card p-4 hover:border-gray-300 transition-colors">
+          <div class="text-xs font-medium text-gray-500">Ideas</div>
+          <div class="text-2xl font-semibold text-amber-600 mt-1">
+            {{ ideasStore.ideas.length }}
+          </div>
+        </RouterLink>
+
         <div v-if="authStore.canViewTeamContent" class="card p-4">
-          <div class="text-sm font-medium text-gray-500">Validated This Week</div>
+          <div class="text-xs font-medium text-gray-500">Validated This Week</div>
           <div class="text-2xl font-semibold text-green-600 mt-1">
             {{ validatedThisWeek }}
           </div>
@@ -196,7 +317,7 @@ function formatDate(timestamp: { toDate: () => Date } | null) {
           to="/delivery"
           class="card p-4 hover:border-gray-300 transition-colors"
         >
-          <div class="text-sm font-medium text-gray-500">Open Blockers</div>
+          <div class="text-xs font-medium text-gray-500">Blockers</div>
           <div
             :class="[
               'text-2xl font-semibold mt-1',

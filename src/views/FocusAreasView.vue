@@ -1,12 +1,27 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useFocusAreasStore } from '@/stores/focusAreas'
+import { useCustomerArchetypesStore } from '@/stores/customerArchetypes'
+import { useDiscoveryStore } from '@/stores/discovery'
+import { useIdeasStore } from '@/stores/ideas'
+import { useObjectivesStore } from '@/stores/objectives'
+import { useDecisionsStore } from '@/stores/decisions'
+import { useDeliveryStore } from '@/stores/delivery'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import type { FocusArea, ConfidenceLevel } from '@/types'
+import ConnectionBadge from '@/components/ConnectionBadge.vue'
+import RelatedItems from '@/components/RelatedItems.vue'
 
 const authStore = useAuthStore()
 const focusAreasStore = useFocusAreasStore()
+const archetypesStore = useCustomerArchetypesStore()
+const discoveryStore = useDiscoveryStore()
+const ideasStore = useIdeasStore()
+const objectivesStore = useObjectivesStore()
+const decisionsStore = useDecisionsStore()
+const deliveryStore = useDeliveryStore()
 const functions = getFunctions()
 
 const showAddForm = ref(false)
@@ -24,20 +39,111 @@ const defaultForm = {
   confidenceLevel: 'medium' as ConfidenceLevel,
   confidenceRationale: '',
   successCriteria: [''],
+  targetArchetypeIds: [] as string[],
 }
 
 const form = ref({ ...defaultForm })
 
+// Expanded focus area for showing connections
+const expandedFocusAreaId = ref<string | null>(null)
+
+// All usable archetypes (not archived)
+const availableArchetypes = computed(() =>
+  archetypesStore.archetypes.filter(a => a.status !== 'archived')
+)
+
 onMounted(() => {
   focusAreasStore.subscribe()
+  archetypesStore.subscribe()
+  discoveryStore.subscribe()
+  ideasStore.subscribe()
+  objectivesStore.subscribe()
+  decisionsStore.subscribe()
+  deliveryStore.subscribe()
 })
 
 onUnmounted(() => {
   focusAreasStore.unsubscribe()
+  archetypesStore.unsubscribe()
+  discoveryStore.unsubscribe()
+  ideasStore.unsubscribe()
+  objectivesStore.unsubscribe()
+  decisionsStore.unsubscribe()
+  deliveryStore.unsubscribe()
 })
 
+// Get related items for a focus area
+function getRelatedItems(focusAreaId: string) {
+  const items: { id: string; type: string; title: string; status?: string; path?: string }[] = []
+
+  // Archetypes linked to this focus area
+  archetypesStore.archetypes
+    .filter(a => a.relatedFocusAreaIds?.includes(focusAreaId))
+    .forEach(a => items.push({
+      id: a.id, type: 'archetype', title: a.name, status: a.status, path: '/customer-archetypes'
+    }))
+
+  // Hypotheses linked to this focus area
+  discoveryStore.hypotheses
+    .filter(h => h.focusAreaId === focusAreaId)
+    .forEach(h => items.push({
+      id: h.id, type: 'hypothesis', title: h.belief.substring(0, 60) + (h.belief.length > 60 ? '...' : ''), status: h.status, path: '/discovery'
+    }))
+
+  // Ideas linked to this focus area
+  ideasStore.ideas
+    .filter(i => i.focusAreaId === focusAreaId)
+    .forEach(i => items.push({
+      id: i.id, type: 'idea', title: i.title, status: i.status, path: '/idea-hopper'
+    }))
+
+  // Objectives linked to this focus area
+  objectivesStore.objectives
+    .filter(o => o.focusAreaIds?.includes(focusAreaId))
+    .forEach(o => items.push({
+      id: o.id, type: 'objective', title: o.title, status: o.status, path: '/objectives'
+    }))
+
+  // Decisions linked to this focus area
+  decisionsStore.decisions
+    .filter(d => d.focusAreaId === focusAreaId)
+    .forEach(d => items.push({
+      id: d.id, type: 'decision', title: d.title, status: d.status, path: '/decisions'
+    }))
+
+  // Blockers linked to this focus area
+  deliveryStore.blockers
+    .filter(b => b.focusAreaId === focusAreaId)
+    .forEach(b => items.push({
+      id: b.id, type: 'blocker', title: b.title, status: b.status, path: '/delivery'
+    }))
+
+  return items
+}
+
+// Get connection counts for a focus area
+function getConnectionCounts(focusAreaId: string) {
+  return {
+    archetypes: archetypesStore.archetypes.filter(a => a.relatedFocusAreaIds?.includes(focusAreaId)).length,
+    hypotheses: discoveryStore.hypotheses.filter(h => h.focusAreaId === focusAreaId).length,
+    ideas: ideasStore.ideas.filter(i => i.focusAreaId === focusAreaId).length,
+    objectives: objectivesStore.objectives.filter(o => o.focusAreaIds?.includes(focusAreaId)).length,
+    decisions: decisionsStore.decisions.filter(d => d.focusAreaId === focusAreaId).length,
+    blockers: deliveryStore.blockers.filter(b => b.focusAreaId === focusAreaId).length,
+  }
+}
+
+function toggleExpanded(id: string) {
+  expandedFocusAreaId.value = expandedFocusAreaId.value === id ? null : id
+}
+
+// Update target archetypes for a focus area
+async function updateTargetArchetypes(focusAreaId: string, archetypeIds: string[]) {
+  await focusAreasStore.updateFocusArea(focusAreaId, { targetArchetypeIds: archetypeIds })
+}
+
 function resetForm() {
-  form.value = { ...defaultForm, successCriteria: [''] }
+  form.value = { ...defaultForm, successCriteria: [''], targetArchetypeIds: [] }
   showAddForm.value = false
   editingId.value = null
 }
@@ -60,6 +166,7 @@ async function handleSubmit() {
       confidenceLevel: form.value.confidenceLevel,
       confidenceRationale: form.value.confidenceRationale,
       successCriteria: criteria,
+      targetArchetypeIds: form.value.targetArchetypeIds,
     })
   } else {
     await focusAreasStore.addFocusArea({
@@ -68,6 +175,7 @@ async function handleSubmit() {
       confidenceLevel: form.value.confidenceLevel,
       confidenceRationale: form.value.confidenceRationale,
       successCriteria: criteria,
+      targetArchetypeIds: form.value.targetArchetypeIds,
     })
   }
   resetForm()
@@ -81,6 +189,7 @@ function startEditing(focusArea: FocusArea) {
     confidenceLevel: focusArea.confidenceLevel,
     confidenceRationale: focusArea.confidenceRationale,
     successCriteria: focusArea.successCriteria.length ? [...focusArea.successCriteria] : [''],
+    targetArchetypeIds: focusArea.targetArchetypeIds ? [...focusArea.targetArchetypeIds] : [],
   }
   showAddForm.value = true
 }
@@ -245,6 +354,48 @@ function closeAiDrawer() {
         </div>
       </div>
 
+      <!-- Target Customer Archetypes -->
+      <div>
+        <label class="label">Target Customer Archetypes</label>
+        <p class="text-xs text-gray-500 mb-2">Which customers experience this problem?</p>
+        <div v-if="availableArchetypes.length > 0" class="space-y-2">
+          <div class="flex flex-wrap gap-2">
+            <label
+              v-for="arch in availableArchetypes"
+              :key="arch.id"
+              :class="[
+                'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors',
+                form.targetArchetypeIds.includes(arch.id)
+                  ? 'bg-purple-100 border-purple-300 text-purple-800'
+                  : 'bg-white border-gray-200 text-gray-600 hover:border-purple-200'
+              ]"
+            >
+              <input
+                type="checkbox"
+                :checked="form.targetArchetypeIds.includes(arch.id)"
+                class="sr-only"
+                @change="() => {
+                  if (form.targetArchetypeIds.includes(arch.id)) {
+                    form.targetArchetypeIds = form.targetArchetypeIds.filter(id => id !== arch.id)
+                  } else {
+                    form.targetArchetypeIds = [...form.targetArchetypeIds, arch.id]
+                  }
+                }"
+              />
+              <span class="text-sm">{{ arch.name }}</span>
+              <span class="text-xs opacity-60">{{ arch.stakeholderRole }}</span>
+            </label>
+          </div>
+          <RouterLink to="/customer-archetypes" class="text-xs text-purple-600 hover:underline">
+            + Add new archetype
+          </RouterLink>
+        </div>
+        <p v-else class="text-sm text-gray-400 italic">
+          No customer archetypes defined yet.
+          <RouterLink to="/customer-archetypes" class="text-purple-600 hover:underline">Create one</RouterLink>
+        </p>
+      </div>
+
       <div class="flex gap-2 justify-end pt-2">
         <button class="btn-ghost" @click="resetForm">Cancel</button>
         <button
@@ -275,54 +426,176 @@ function closeAiDrawer() {
           <div
             v-for="fa in focusAreasStore.activeFocusAreas"
             :key="fa.id"
-            class="card p-4 group"
+            class="card overflow-hidden group"
           >
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <h3 class="font-medium text-gray-900 truncate">{{ fa.title }}</h3>
-                  <span :class="getConfidenceBadgeClass(fa.confidenceLevel)">
-                    {{ fa.confidenceLevel }}
-                  </span>
-                </div>
-                <p class="text-sm text-gray-600 mb-2">{{ fa.problemStatement }}</p>
+            <!-- Main content - clickable to expand -->
+            <div
+              class="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+              @click="toggleExpanded(fa.id)"
+            >
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-1 flex-wrap">
+                    <svg
+                      :class="[
+                        'w-4 h-4 text-gray-400 transition-transform flex-shrink-0',
+                        expandedFocusAreaId === fa.id ? 'rotate-90' : ''
+                      ]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <h3 class="font-medium text-gray-900 truncate">{{ fa.title }}</h3>
+                    <span :class="getConfidenceBadgeClass(fa.confidenceLevel)">
+                      {{ fa.confidenceLevel }}
+                    </span>
+                    <!-- Connection badges -->
+                    <div class="flex gap-1 ml-2">
+                      <ConnectionBadge
+                        v-if="getConnectionCounts(fa.id).archetypes > 0"
+                        :count="getConnectionCounts(fa.id).archetypes"
+                        type="archetype"
+                      />
+                      <ConnectionBadge
+                        v-if="getConnectionCounts(fa.id).hypotheses > 0"
+                        :count="getConnectionCounts(fa.id).hypotheses"
+                        type="hypothesis"
+                      />
+                      <ConnectionBadge
+                        v-if="getConnectionCounts(fa.id).ideas > 0"
+                        :count="getConnectionCounts(fa.id).ideas"
+                        type="idea"
+                      />
+                      <ConnectionBadge
+                        v-if="getConnectionCounts(fa.id).objectives > 0"
+                        :count="getConnectionCounts(fa.id).objectives"
+                        type="objective"
+                      />
+                      <ConnectionBadge
+                        v-if="getConnectionCounts(fa.id).blockers > 0"
+                        :count="getConnectionCounts(fa.id).blockers"
+                        type="blocker"
+                      />
+                    </div>
+                  </div>
+                  <p class="text-sm text-gray-600 mb-2 pl-6">{{ fa.problemStatement }}</p>
 
-                <div v-if="fa.confidenceRationale" class="text-xs text-gray-500 mb-2">
-                  <span class="font-medium">Rationale:</span> {{ fa.confidenceRationale }}
+                  <div v-if="fa.confidenceRationale" class="text-xs text-gray-500 mb-2 pl-6">
+                    <span class="font-medium">Rationale:</span> {{ fa.confidenceRationale }}
+                  </div>
+
+                  <div v-if="fa.successCriteria?.length" class="mt-2 pl-6">
+                    <div class="text-xs font-medium text-gray-500 mb-1">Success Criteria:</div>
+                    <ul class="text-sm text-gray-600 space-y-1">
+                      <li v-for="(criteria, i) in fa.successCriteria" :key="i" class="flex gap-2">
+                        <span class="text-gray-400">-</span>
+                        {{ criteria }}
+                      </li>
+                    </ul>
+                  </div>
                 </div>
 
-                <div v-if="fa.successCriteria?.length" class="mt-2">
-                  <div class="text-xs font-medium text-gray-500 mb-1">Success Criteria:</div>
-                  <ul class="text-sm text-gray-600 space-y-1">
-                    <li v-for="(criteria, i) in fa.successCriteria" :key="i" class="flex gap-2">
-                      <span class="text-gray-400">-</span>
-                      {{ criteria }}
-                    </li>
-                  </ul>
+                <div v-if="authStore.canEdit" class="flex gap-1 opacity-0 group-hover:opacity-100" @click.stop>
+                  <button
+                    class="p-1.5 text-gray-400 hover:text-gray-600 rounded"
+                    title="Edit"
+                    @click="startEditing(fa)"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </button>
+                  <button
+                    class="p-1.5 text-gray-400 hover:text-yellow-600 rounded"
+                    title="Archive"
+                    @click="handleArchive(fa.id)"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                    </svg>
+                  </button>
                 </div>
-              </div>
-
-              <div v-if="authStore.canEdit" class="flex gap-1 opacity-0 group-hover:opacity-100">
-                <button
-                  class="p-1.5 text-gray-400 hover:text-gray-600 rounded"
-                  title="Edit"
-                  @click="startEditing(fa)"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
-                </button>
-                <button
-                  class="p-1.5 text-gray-400 hover:text-yellow-600 rounded"
-                  title="Archive"
-                  @click="handleArchive(fa.id)"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                  </svg>
-                </button>
               </div>
             </div>
+
+            <!-- Expanded section with connections -->
+            <Transition name="expand">
+              <div v-if="expandedFocusAreaId === fa.id" class="border-t bg-gray-50">
+                <div class="p-4 space-y-4">
+                  <!-- Target Customer Archetypes -->
+                  <div>
+                    <div class="flex items-center gap-2 mb-2">
+                      <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span class="text-sm font-medium text-gray-700">Target Customer Archetypes</span>
+                    </div>
+                    <div v-if="availableArchetypes.length > 0" class="space-y-2">
+                      <div class="flex flex-wrap gap-2">
+                        <label
+                          v-for="arch in availableArchetypes"
+                          :key="arch.id"
+                          :class="[
+                            'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors',
+                            fa.targetArchetypeIds?.includes(arch.id)
+                              ? 'bg-purple-100 border-purple-300 text-purple-800'
+                              : 'bg-white border-gray-200 text-gray-600 hover:border-purple-200'
+                          ]"
+                        >
+                          <input
+                            type="checkbox"
+                            :checked="fa.targetArchetypeIds?.includes(arch.id)"
+                            class="sr-only"
+                            @change="() => {
+                              const current = fa.targetArchetypeIds || []
+                              const updated = current.includes(arch.id)
+                                ? current.filter(id => id !== arch.id)
+                                : [...current, arch.id]
+                              updateTargetArchetypes(fa.id, updated)
+                            }"
+                          />
+                          <span class="text-sm">{{ arch.name }}</span>
+                          <span class="text-xs opacity-60">{{ arch.stakeholderRole }}</span>
+                        </label>
+                      </div>
+                      <RouterLink to="/customer-archetypes" class="text-xs text-purple-600 hover:underline">
+                        + Add new archetype
+                      </RouterLink>
+                    </div>
+                    <p v-else class="text-sm text-gray-400 italic">
+                      No customer archetypes defined yet.
+                      <RouterLink to="/customer-archetypes" class="text-purple-600 hover:underline">Create one</RouterLink>
+                    </p>
+                  </div>
+
+                  <!-- Related Items -->
+                  <div v-if="getRelatedItems(fa.id).length > 0">
+                    <RelatedItems
+                      :items="getRelatedItems(fa.id)"
+                      title="Connected Items"
+                      compact
+                    />
+                  </div>
+
+                  <!-- Empty state for connections -->
+                  <div v-else-if="!fa.targetArchetypeIds?.length" class="bg-yellow-50 rounded-lg p-3">
+                    <div class="flex items-start gap-2">
+                      <svg class="w-5 h-5 text-yellow-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <div>
+                        <p class="text-sm font-medium text-yellow-800">No connections yet</p>
+                        <p class="text-xs text-yellow-600 mt-1">
+                          Link this focus area to customer archetypes, hypotheses, or ideas to track progress.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Transition>
           </div>
         </div>
       </section>
@@ -516,5 +789,23 @@ function closeAiDrawer() {
 .drawer-enter-from .absolute.inset-y-0,
 .drawer-leave-to .absolute.inset-y-0 {
   transform: translateX(100%);
+}
+
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.expand-enter-to,
+.expand-leave-from {
+  max-height: 500px;
+  opacity: 1;
 }
 </style>

@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDiscoveryStore } from '@/stores/discovery'
 import { useFocusAreasStore } from '@/stores/focusAreas'
+import { useCustomerArchetypesStore } from '@/stores/customerArchetypes'
+import { useDecisionsStore } from '@/stores/decisions'
+import { useDeliveryStore } from '@/stores/delivery'
 import type { Hypothesis, HypothesisStatus, RiskType } from '@/types'
+import ConnectionBadge from '@/components/ConnectionBadge.vue'
+import RelatedItems from '@/components/RelatedItems.vue'
 
 const authStore = useAuthStore()
 const discoveryStore = useDiscoveryStore()
 const focusAreasStore = useFocusAreasStore()
+const archetypesStore = useCustomerArchetypesStore()
+const decisionsStore = useDecisionsStore()
+const deliveryStore = useDeliveryStore()
 
 const activeFilter = ref<HypothesisStatus | 'all'>('all')
 const showAddHypothesis = ref(false)
@@ -35,6 +44,7 @@ const defaultHypothesisForm = {
   result: '',
   risks: [] as RiskType[],
   focusAreaId: '',
+  archetypeId: '',
 }
 
 const hypothesisForm = ref({ ...defaultHypothesisForm })
@@ -43,7 +53,11 @@ const feedbackForm = ref({
   source: '',
   content: '',
   theme: '',
+  archetypeId: '',
 })
+
+// Expanded hypothesis for showing connections
+const expandedHypothesisId = ref<string | null>(null)
 
 const filteredHypotheses = computed(() => {
   return discoveryStore.filterByStatus(activeFilter.value)
@@ -60,11 +74,17 @@ const filterCounts = computed(() => ({
 onMounted(() => {
   discoveryStore.subscribe()
   focusAreasStore.subscribe()
+  archetypesStore.subscribe()
+  decisionsStore.subscribe()
+  deliveryStore.subscribe()
 })
 
 onUnmounted(() => {
   discoveryStore.unsubscribe()
   focusAreasStore.unsubscribe()
+  archetypesStore.unsubscribe()
+  decisionsStore.unsubscribe()
+  deliveryStore.unsubscribe()
 })
 
 function resetHypothesisForm() {
@@ -90,6 +110,7 @@ async function handleSubmitHypothesis() {
       result: hypothesisForm.value.result,
       risks: hypothesisForm.value.risks,
       focusAreaId: hypothesisForm.value.focusAreaId || undefined,
+      archetypeId: hypothesisForm.value.archetypeId || undefined,
     })
   } else {
     await discoveryStore.addHypothesis({
@@ -97,6 +118,7 @@ async function handleSubmitHypothesis() {
       test: hypothesisForm.value.test,
       risks: hypothesisForm.value.risks,
       focusAreaId: hypothesisForm.value.focusAreaId || undefined,
+      archetypeId: hypothesisForm.value.archetypeId || undefined,
     })
   }
   resetHypothesisForm()
@@ -110,6 +132,7 @@ function startEditingHypothesis(h: Hypothesis) {
     result: h.result || '',
     risks: [...h.risks],
     focusAreaId: h.focusAreaId || '',
+    archetypeId: h.archetypeId || '',
   }
   showAddHypothesis.value = true
 }
@@ -128,8 +151,9 @@ async function handleSubmitFeedback() {
     source: feedbackForm.value.source,
     content: feedbackForm.value.content,
     theme: feedbackForm.value.theme,
+    archetypeId: feedbackForm.value.archetypeId || undefined,
   })
-  feedbackForm.value = { source: '', content: '', theme: '' }
+  feedbackForm.value = { source: '', content: '', theme: '', archetypeId: '' }
   showAddFeedback.value = false
 }
 
@@ -159,6 +183,69 @@ function getFocusAreaTitle(id?: string) {
   if (!id) return null
   const fa = focusAreasStore.focusAreas.find((f) => f.id === id)
   return fa?.title
+}
+
+function getArchetypeName(id?: string) {
+  if (!id) return null
+  const arch = archetypesStore.archetypes.find((a) => a.id === id)
+  return arch?.name
+}
+
+function toggleExpanded(id: string) {
+  expandedHypothesisId.value = expandedHypothesisId.value === id ? null : id
+}
+
+// Get related items for a hypothesis
+function getRelatedItems(hypothesisId: string) {
+  const items: { id: string; type: string; title: string; status?: string; path?: string }[] = []
+  const hypothesis = discoveryStore.hypotheses.find(h => h.id === hypothesisId)
+
+  // Focus Area
+  if (hypothesis?.focusAreaId) {
+    const fa = focusAreasStore.focusAreas.find(f => f.id === hypothesis.focusAreaId)
+    if (fa) {
+      items.push({
+        id: fa.id, type: 'focus-area', title: fa.title, status: fa.status, path: '/focus-areas'
+      })
+    }
+  }
+
+  // Archetype
+  if (hypothesis?.archetypeId) {
+    const arch = archetypesStore.archetypes.find(a => a.id === hypothesis.archetypeId)
+    if (arch) {
+      items.push({
+        id: arch.id, type: 'archetype', title: arch.name, status: arch.status, path: '/customer-archetypes'
+      })
+    }
+  }
+
+  // Decisions using this hypothesis
+  decisionsStore.decisions
+    .filter(d => d.relatedHypothesisIds?.includes(hypothesisId))
+    .forEach(d => items.push({
+      id: d.id, type: 'decision', title: d.title, status: d.status, path: '/decisions'
+    }))
+
+  // Changelog entries that validated this hypothesis
+  deliveryStore.changelog
+    .filter(c => c.validatedHypothesisIds?.includes(hypothesisId))
+    .forEach(c => items.push({
+      id: c.id, type: 'changelog', title: c.title, path: '/delivery'
+    }))
+
+  return items
+}
+
+// Get connection counts for a hypothesis
+function getConnectionCounts(hypothesisId: string) {
+  const hypothesis = discoveryStore.hypotheses.find(h => h.id === hypothesisId)
+  return {
+    focusArea: hypothesis?.focusAreaId ? 1 : 0,
+    archetype: hypothesis?.archetypeId ? 1 : 0,
+    decisions: decisionsStore.decisions.filter(d => d.relatedHypothesisIds?.includes(hypothesisId)).length,
+    changelog: deliveryStore.changelog.filter(c => c.validatedHypothesisIds?.includes(hypothesisId)).length,
+  }
 }
 </script>
 
@@ -227,18 +314,34 @@ function getFocusAreaTitle(id?: string) {
         </div>
       </div>
 
-      <div>
-        <label class="label">Related Focus Area (optional)</label>
-        <select v-model="hypothesisForm.focusAreaId" class="input">
-          <option value="">None</option>
-          <option
-            v-for="fa in focusAreasStore.activeFocusAreas"
-            :key="fa.id"
-            :value="fa.id"
-          >
-            {{ fa.title }}
-          </option>
-        </select>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="label">Related Focus Area (optional)</label>
+          <select v-model="hypothesisForm.focusAreaId" class="input">
+            <option value="">None</option>
+            <option
+              v-for="fa in focusAreasStore.activeFocusAreas"
+              :key="fa.id"
+              :value="fa.id"
+            >
+              {{ fa.title }}
+            </option>
+          </select>
+        </div>
+
+        <div>
+          <label class="label">About Customer Archetype (optional)</label>
+          <select v-model="hypothesisForm.archetypeId" class="input">
+            <option value="">None</option>
+            <option
+              v-for="arch in archetypesStore.activeArchetypes"
+              :key="arch.id"
+              :value="arch.id"
+            >
+              {{ arch.name }}
+            </option>
+          </select>
+        </div>
       </div>
 
       <div class="flex gap-2 justify-end pt-2">
@@ -286,92 +389,205 @@ function getFocusAreaTitle(id?: string) {
           <div
             v-for="h in filteredHypotheses"
             :key="h.id"
-            class="card p-4 group"
+            class="card overflow-hidden group"
           >
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-2 flex-wrap">
-                  <span :class="getStatusBadgeClass(h.status)">{{ h.status }}</span>
-                  <span
-                    v-for="risk in h.risks"
-                    :key="risk"
-                    :class="getRiskBadgeClass(risk)"
-                  >
-                    {{ risk }}
-                  </span>
-                  <span v-if="getFocusAreaTitle(h.focusAreaId)" class="text-xs text-gray-400">
-                    {{ getFocusAreaTitle(h.focusAreaId) }}
-                  </span>
-                </div>
-
-                <div class="space-y-2 text-sm">
-                  <div>
-                    <span class="font-medium text-gray-500">Belief:</span>
-                    <span class="text-gray-900 ml-1">{{ h.belief }}</span>
+            <!-- Main content - clickable to expand -->
+            <div
+              class="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+              @click="toggleExpanded(h.id)"
+            >
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-2 flex-wrap">
+                    <svg
+                      :class="[
+                        'w-4 h-4 text-gray-400 transition-transform flex-shrink-0',
+                        expandedHypothesisId === h.id ? 'rotate-90' : ''
+                      ]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span :class="getStatusBadgeClass(h.status)">{{ h.status }}</span>
+                    <span
+                      v-for="risk in h.risks"
+                      :key="risk"
+                      :class="getRiskBadgeClass(risk)"
+                    >
+                      {{ risk }}
+                    </span>
+                    <!-- Connection badges -->
+                    <div class="flex gap-1 ml-1">
+                      <ConnectionBadge
+                        v-if="getConnectionCounts(h.id).archetype > 0"
+                        :count="getConnectionCounts(h.id).archetype"
+                        type="archetype"
+                      />
+                      <ConnectionBadge
+                        v-if="getConnectionCounts(h.id).focusArea > 0"
+                        :count="getConnectionCounts(h.id).focusArea"
+                        type="focus-area"
+                      />
+                      <ConnectionBadge
+                        v-if="getConnectionCounts(h.id).decisions > 0"
+                        :count="getConnectionCounts(h.id).decisions"
+                        type="decision"
+                      />
+                      <ConnectionBadge
+                        v-if="getConnectionCounts(h.id).changelog > 0"
+                        :count="getConnectionCounts(h.id).changelog"
+                        type="changelog"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <span class="font-medium text-gray-500">Test:</span>
-                    <span class="text-gray-900 ml-1">{{ h.test }}</span>
+
+                  <div class="space-y-2 text-sm pl-6">
+                    <div>
+                      <span class="font-medium text-gray-500">Belief:</span>
+                      <span class="text-gray-900 ml-1">{{ h.belief }}</span>
+                    </div>
+                    <div>
+                      <span class="font-medium text-gray-500">Test:</span>
+                      <span class="text-gray-900 ml-1">{{ h.test }}</span>
+                    </div>
+                    <div v-if="h.result">
+                      <span class="font-medium text-gray-500">Result:</span>
+                      <span class="text-gray-900 ml-1">{{ h.result }}</span>
+                    </div>
                   </div>
-                  <div v-if="h.result">
-                    <span class="font-medium text-gray-500">Result:</span>
-                    <span class="text-gray-900 ml-1">{{ h.result }}</span>
+
+                  <!-- Quick status actions -->
+                  <div v-if="authStore.canEdit && h.status === 'active'" class="flex gap-2 mt-3 pl-6" @click.stop>
+                    <button
+                      class="text-xs px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100"
+                      @click="updateStatus(h.id, 'validated')"
+                    >
+                      Mark Validated
+                    </button>
+                    <button
+                      class="text-xs px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100"
+                      @click="updateStatus(h.id, 'invalidated')"
+                    >
+                      Mark Invalidated
+                    </button>
+                    <button
+                      class="text-xs px-2 py-1 rounded bg-gray-50 text-gray-700 hover:bg-gray-100"
+                      @click="updateStatus(h.id, 'parked')"
+                    >
+                      Park
+                    </button>
+                  </div>
+
+                  <div v-else-if="authStore.canEdit && h.status !== 'active'" class="mt-3 pl-6" @click.stop>
+                    <button
+                      class="text-xs px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100"
+                      @click="updateStatus(h.id, 'active')"
+                    >
+                      Reactivate
+                    </button>
                   </div>
                 </div>
 
-                <!-- Quick status actions -->
-                <div v-if="authStore.canEdit && h.status === 'active'" class="flex gap-2 mt-3">
+                <div v-if="authStore.canEdit" class="flex gap-1 opacity-0 group-hover:opacity-100" @click.stop>
                   <button
-                    class="text-xs px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100"
-                    @click="updateStatus(h.id, 'validated')"
+                    class="p-1.5 text-gray-400 hover:text-gray-600 rounded"
+                    title="Edit"
+                    @click="startEditingHypothesis(h)"
                   >
-                    Mark Validated
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
                   </button>
                   <button
-                    class="text-xs px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100"
-                    @click="updateStatus(h.id, 'invalidated')"
+                    class="p-1.5 text-gray-400 hover:text-red-600 rounded"
+                    title="Delete"
+                    @click="handleDeleteHypothesis(h.id)"
                   >
-                    Mark Invalidated
-                  </button>
-                  <button
-                    class="text-xs px-2 py-1 rounded bg-gray-50 text-gray-700 hover:bg-gray-100"
-                    @click="updateStatus(h.id, 'parked')"
-                  >
-                    Park
-                  </button>
-                </div>
-
-                <div v-else-if="authStore.canEdit && h.status !== 'active'" class="mt-3">
-                  <button
-                    class="text-xs px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100"
-                    @click="updateStatus(h.id, 'active')"
-                  >
-                    Reactivate
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
                   </button>
                 </div>
-              </div>
-
-              <div v-if="authStore.canEdit" class="flex gap-1 opacity-0 group-hover:opacity-100">
-                <button
-                  class="p-1.5 text-gray-400 hover:text-gray-600 rounded"
-                  title="Edit"
-                  @click="startEditingHypothesis(h)"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
-                </button>
-                <button
-                  class="p-1.5 text-gray-400 hover:text-red-600 rounded"
-                  title="Delete"
-                  @click="handleDeleteHypothesis(h.id)"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
               </div>
             </div>
+
+            <!-- Expanded section with connections -->
+            <Transition name="expand">
+              <div v-if="expandedHypothesisId === h.id" class="border-t bg-gray-50">
+                <div class="p-4 space-y-4">
+                  <!-- Linked items display -->
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Focus Area link -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-2">
+                        <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                        <span class="text-sm font-medium text-gray-700">Focus Area</span>
+                      </div>
+                      <RouterLink
+                        v-if="getFocusAreaTitle(h.focusAreaId)"
+                        to="/focus-areas"
+                        class="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
+                      >
+                        <span class="text-sm">{{ getFocusAreaTitle(h.focusAreaId) }}</span>
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </RouterLink>
+                      <span v-else class="text-sm text-gray-400 italic">Not linked</span>
+                    </div>
+
+                    <!-- Archetype link -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-2">
+                        <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        <span class="text-sm font-medium text-gray-700">Customer Archetype</span>
+                      </div>
+                      <RouterLink
+                        v-if="getArchetypeName(h.archetypeId)"
+                        to="/customer-archetypes"
+                        class="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors"
+                      >
+                        <span class="text-sm">{{ getArchetypeName(h.archetypeId) }}</span>
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </RouterLink>
+                      <span v-else class="text-sm text-gray-400 italic">Not linked</span>
+                    </div>
+                  </div>
+
+                  <!-- Related Items (decisions, changelog) -->
+                  <div v-if="getRelatedItems(h.id).filter(i => i.type === 'decision' || i.type === 'changelog').length > 0">
+                    <RelatedItems
+                      :items="getRelatedItems(h.id).filter(i => i.type === 'decision' || i.type === 'changelog')"
+                      title="Used In"
+                      compact
+                    />
+                  </div>
+
+                  <!-- Empty state for connections -->
+                  <div v-else-if="!h.focusAreaId && !h.archetypeId" class="bg-yellow-50 rounded-lg p-3">
+                    <div class="flex items-start gap-2">
+                      <svg class="w-5 h-5 text-yellow-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <div>
+                        <p class="text-sm font-medium text-yellow-800">Not connected</p>
+                        <p class="text-xs text-yellow-600 mt-1">
+                          Link this hypothesis to a focus area or customer archetype for better tracking.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Transition>
           </div>
         </div>
       </section>
@@ -414,7 +630,7 @@ function getFocusAreaTitle(id?: string) {
 
         <!-- Add feedback form -->
         <div v-if="showAddFeedback" class="card p-4 mb-4 space-y-3">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label class="label">Source</label>
               <input
@@ -430,6 +646,19 @@ function getFocusAreaTitle(id?: string) {
                 class="input"
                 placeholder="e.g., Onboarding, Scheduling"
               />
+            </div>
+            <div>
+              <label class="label">Customer Archetype</label>
+              <select v-model="feedbackForm.archetypeId" class="input">
+                <option value="">None</option>
+                <option
+                  v-for="arch in archetypesStore.activeArchetypes"
+                  :key="arch.id"
+                  :value="arch.id"
+                >
+                  {{ arch.name }}
+                </option>
+              </select>
             </div>
           </div>
           <div>
@@ -464,9 +693,19 @@ function getFocusAreaTitle(id?: string) {
           >
             <div class="flex items-start justify-between gap-4">
               <div class="flex-1">
-                <div class="flex items-center gap-2 mb-1">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
                   <span class="text-sm font-medium text-gray-900">{{ fb.source }}</span>
                   <span v-if="fb.theme" class="badge-gray">{{ fb.theme }}</span>
+                  <RouterLink
+                    v-if="getArchetypeName(fb.archetypeId)"
+                    to="/customer-archetypes"
+                    class="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200"
+                  >
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    {{ getArchetypeName(fb.archetypeId) }}
+                  </RouterLink>
                 </div>
                 <p class="text-sm text-gray-600">{{ fb.content }}</p>
               </div>
@@ -486,3 +725,23 @@ function getFocusAreaTitle(id?: string) {
     </template>
   </div>
 </template>
+
+<style scoped>
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.expand-enter-to,
+.expand-leave-from {
+  max-height: 500px;
+  opacity: 1;
+}
+</style>

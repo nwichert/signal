@@ -67,6 +67,7 @@ export const useFocusAreasStore = defineStore('focusAreas', () => {
     confidenceLevel: ConfidenceLevel
     confidenceRationale: string
     successCriteria: string[]
+    targetArchetypeIds?: string[]
   }) {
     const authStore = useAuthStore()
     if (!authStore.canEdit) {
@@ -102,6 +103,7 @@ export const useFocusAreasStore = defineStore('focusAreas', () => {
       confidenceRationale: string
       successCriteria: string[]
       status: FocusAreaStatus
+      targetArchetypeIds: string[]
     }>
   ) {
     const authStore = useAuthStore()

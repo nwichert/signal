@@ -44,6 +44,8 @@ export interface FocusArea {
   confidenceRationale: string
   successCriteria: string[]
   status: FocusAreaStatus
+  // Cross-feature links
+  targetArchetypeIds?: string[]  // Which customer archetypes experience this problem
   createdAt: Timestamp
   updatedAt: Timestamp
   createdBy: string
@@ -61,6 +63,8 @@ export interface Hypothesis {
   status: HypothesisStatus
   risks: RiskType[]
   focusAreaId?: string
+  // Cross-feature links
+  archetypeId?: string  // Which customer archetype this hypothesis is about
   createdAt: Timestamp
   updatedAt: Timestamp
   createdBy: string
@@ -73,6 +77,8 @@ export interface Feedback {
   content: string
   theme: string
   hypothesisId?: string
+  // Cross-feature links
+  archetypeId?: string  // Which customer archetype this feedback is from
   createdAt: Timestamp
   createdBy: string
 }
@@ -96,6 +102,9 @@ export interface ChangelogEntry {
   type: 'feature' | 'fix' | 'improvement' | 'technical'
   shippedAt: Timestamp
   createdBy: string
+  // Cross-feature links
+  focusAreaId?: string           // Which focus area this addresses
+  validatedHypothesisIds?: string[]  // Which hypotheses this feature validates
 }
 
 export interface Blocker {
@@ -106,6 +115,8 @@ export interface Blocker {
   status: 'open' | 'resolved'
   createdAt: Timestamp
   resolvedAt?: Timestamp
+  // Cross-feature links
+  focusAreaId?: string  // Which focus area is blocked
 }
 
 // Dashboard aggregates
@@ -160,6 +171,8 @@ export interface Objective {
   createdAt: Timestamp
   updatedAt: Timestamp
   createdBy: string
+  // Cross-feature links
+  focusAreaIds?: string[]  // Which focus areas this objective addresses
 }
 
 // Decisions Log
@@ -189,33 +202,56 @@ export interface Decision {
   createdAt: Timestamp
   updatedAt: Timestamp
   createdBy: string
+  // Cross-feature links
+  focusAreaId?: string          // Which focus area this decision affects
+  relatedHypothesisIds?: string[]  // Hypotheses informing this decision
 }
 
-// Documents Repository
-export type DocumentCategory =
-  | 'research'
-  | 'design'
-  | 'technical'
-  | 'business'
-  | 'legal'
-  | 'other'
+// Knowledge Center - Documents Repository
+export type DocumentType = 'knowledge' | 'inspiration'
+
+export type KnowledgeCategory =
+  | 'strategy'      // Company/product strategy docs
+  | 'brand'         // Brand guidelines, voice & tone
+  | 'research'      // User research, market research
+  | 'technical'     // Technical specs, architecture docs
+  | 'process'       // Team processes, playbooks
+  | 'reference'     // General reference material
+
+export type InspirationCategory =
+  | 'ux-pattern'    // UI/UX patterns and examples
+  | 'competitor'    // Competitor screenshots/analysis
+  | 'article'       // Interesting articles/posts
+  | 'visual'        // Visual design inspiration
+  | 'product'       // Product ideas from other products
+  | 'other'         // Miscellaneous inspiration
+
+export type DocumentCategory = KnowledgeCategory | InspirationCategory
 
 export interface Document {
   id: string
   name: string
   description: string
+  documentType: DocumentType           // 'knowledge' or 'inspiration'
   category: DocumentCategory
   fileName: string
   fileSize: number
   fileType: string
   storageUrl: string
   storagePath: string
-  externalUrl?: string  // Optional external URL (e.g., Google Doc, Notion, etc.)
+  externalUrl?: string                 // Optional external URL (e.g., Google Doc, Notion, etc.)
+  thumbnailUrl?: string                // For inspiration images - auto-generated preview
   tags: string[]
+  priority: 1 | 2 | 3                  // 1 = high priority context, 2 = medium, 3 = low
+  isProcessed?: boolean                // For knowledge docs: has AI processed/chunked this?
+  summary?: string                     // AI-generated summary for quick reference
   uploadedBy: string
   uploadedByName: string
   createdAt: Timestamp
   updatedAt: Timestamp
+  // Cross-feature links
+  archetypeIds?: string[]              // Which archetypes this document relates to
+  focusAreaIds?: string[]              // Which focus areas this document relates to
 }
 
 // Idea Hopper - Jobs to be Done
@@ -240,6 +276,8 @@ export interface Idea {
   createdAt: Timestamp
   updatedAt: Timestamp
   createdBy: string
+  // Cross-feature links
+  targetArchetypeId?: string  // Which customer archetype this idea serves
 }
 
 // Customer Archetypes - Steve Blank Customer Discovery
@@ -323,6 +361,8 @@ export interface CustomerArchetype {
   createdAt: Timestamp
   updatedAt: Timestamp
   createdBy: string
+  // Cross-feature links
+  relatedFocusAreaIds?: string[]  // Which focus areas this archetype relates to
 }
 
 export interface ValuePropositionMap {
@@ -369,4 +409,21 @@ export interface JourneyMap {
   createdAt: Timestamp
   updatedAt: Timestamp
   createdBy: string
+  // Cross-feature links
+  archetypeId?: string  // Which archetype experiences this journey
+}
+
+// Cross-feature relationship helper type
+export interface RelatedItems {
+  focusAreas: FocusArea[]
+  archetypes: CustomerArchetype[]
+  hypotheses: Hypothesis[]
+  ideas: Idea[]
+  decisions: Decision[]
+  objectives: Objective[]
+  journeyMaps: JourneyMap[]
+  documents: Document[]
+  feedback: Feedback[]
+  changelog: ChangelogEntry[]
+  blockers: Blocker[]
 }

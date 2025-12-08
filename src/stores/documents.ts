@@ -18,7 +18,7 @@ import {
   deleteObject,
 } from 'firebase/storage'
 import { db, storage } from '@/firebase/config'
-import type { Document, DocumentCategory } from '@/types'
+import type { Document, DocumentCategory, DocumentType, KnowledgeCategory, InspirationCategory } from '@/types'
 import { useAuthStore } from './auth'
 
 export const useDocumentsStore = defineStore('documents', () => {
@@ -30,9 +30,38 @@ export const useDocumentsStore = defineStore('documents', () => {
 
   let unsubscribe: (() => void) | null = null
 
+  // Get documents by type (knowledge or inspiration)
+  const knowledgeDocuments = computed(() =>
+    documents.value.filter((d) => d.documentType === 'knowledge')
+  )
+
+  const inspirationDocuments = computed(() =>
+    documents.value.filter((d) => d.documentType === 'inspiration')
+  )
+
+  // Get high-priority knowledge docs (for AI context)
+  const priorityKnowledgeDocs = computed(() =>
+    knowledgeDocuments.value
+      .filter((d) => d.priority === 1)
+      .sort((a, b) => {
+        const aTime = a.updatedAt?.toDate?.()?.getTime() || 0
+        const bTime = b.updatedAt?.toDate?.()?.getTime() || 0
+        return bTime - aTime
+      })
+  )
+
   // Get documents by category
   function getDocumentsByCategory(category: DocumentCategory) {
     return documents.value.filter((d) => d.category === category)
+  }
+
+  // Get documents by type and category
+  function getDocumentsByTypeAndCategory(type: DocumentType, category?: DocumentCategory) {
+    let result = documents.value.filter((d) => d.documentType === type)
+    if (category) {
+      result = result.filter((d) => d.category === category)
+    }
+    return result
   }
 
   // Get unique tags from all documents
@@ -44,15 +73,31 @@ export const useDocumentsStore = defineStore('documents', () => {
     return Array.from(tags).sort()
   })
 
+  // Get tags by document type
+  function getTagsByType(type: DocumentType) {
+    const tags = new Set<string>()
+    documents.value
+      .filter((d) => d.documentType === type)
+      .forEach((doc) => {
+        doc.tags.forEach((tag) => tags.add(tag))
+      })
+    return Array.from(tags).sort()
+  }
+
   // Search documents by name, description, or tags
-  function searchDocuments(searchTerm: string) {
+  function searchDocuments(searchTerm: string, type?: DocumentType) {
     const term = searchTerm.toLowerCase()
-    return documents.value.filter(
+    let result = documents.value.filter(
       (doc) =>
         doc.name.toLowerCase().includes(term) ||
         doc.description.toLowerCase().includes(term) ||
-        doc.tags.some((tag) => tag.toLowerCase().includes(term))
+        doc.tags.some((tag) => tag.toLowerCase().includes(term)) ||
+        (doc.summary && doc.summary.toLowerCase().includes(term))
     )
+    if (type) {
+      result = result.filter((d) => d.documentType === type)
+    }
+    return result
   }
 
   function subscribe() {
@@ -94,9 +139,12 @@ export const useDocumentsStore = defineStore('documents', () => {
     data: {
       name: string
       description: string
+      documentType: DocumentType
       category: DocumentCategory
       tags: string[]
+      priority: 1 | 2 | 3
       externalUrl?: string
+      focusAreaIds?: string[]
     }
   ) {
     const authStore = useAuthStore()
@@ -112,7 +160,7 @@ export const useDocumentsStore = defineStore('documents', () => {
       // Generate unique file path
       const timestamp = Date.now()
       const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-      const storagePath = `documents/${timestamp}_${sanitizedFileName}`
+      const storagePath = `documents/${data.documentType}/${timestamp}_${sanitizedFileName}`
 
       // Upload file to Firebase Storage
       const fileRef = storageRef(storage, storagePath)
@@ -127,6 +175,7 @@ export const useDocumentsStore = defineStore('documents', () => {
       const docData: Record<string, unknown> = {
         name: data.name,
         description: data.description,
+        documentType: data.documentType,
         category: data.category,
         fileName: file.name,
         fileSize: file.size,
@@ -134,15 +183,20 @@ export const useDocumentsStore = defineStore('documents', () => {
         storageUrl,
         storagePath,
         tags: data.tags,
+        priority: data.priority,
+        isProcessed: false,
         uploadedBy: authStore.user?.id,
         uploadedByName: authStore.user?.displayName || 'Unknown',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }
 
-      // Add externalUrl if provided
+      // Add optional fields
       if (data.externalUrl) {
         docData.externalUrl = data.externalUrl
+      }
+      if (data.focusAreaIds && data.focusAreaIds.length > 0) {
+        docData.focusAreaIds = data.focusAreaIds
       }
 
       await addDoc(collection(db, 'documents'), docData)
@@ -158,9 +212,52 @@ export const useDocumentsStore = defineStore('documents', () => {
     }
   }
 
+  // Add URL-only inspiration (no file upload needed)
+  async function addInspirationLink(data: {
+    name: string
+    description: string
+    category: InspirationCategory
+    tags: string[]
+    externalUrl: string
+  }) {
+    const authStore = useAuthStore()
+    if (!authStore.canEdit) {
+      throw new Error('Not authorized')
+    }
+
+    error.value = null
+
+    try {
+      const docData = {
+        name: data.name,
+        description: data.description,
+        documentType: 'inspiration' as DocumentType,
+        category: data.category,
+        fileName: '',
+        fileSize: 0,
+        fileType: 'link',
+        storageUrl: '',
+        storagePath: '',
+        externalUrl: data.externalUrl,
+        tags: data.tags,
+        priority: 3 as const,
+        uploadedBy: authStore.user?.id,
+        uploadedByName: authStore.user?.displayName || 'Unknown',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }
+
+      await addDoc(collection(db, 'documents'), docData)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to add inspiration link'
+      error.value = message
+      throw e
+    }
+  }
+
   async function updateDocument(
     id: string,
-    data: Partial<Pick<Document, 'name' | 'description' | 'category' | 'tags' | 'externalUrl'>>
+    data: Partial<Pick<Document, 'name' | 'description' | 'category' | 'tags' | 'externalUrl' | 'priority' | 'summary' | 'focusAreaIds'>>
   ) {
     const authStore = useAuthStore()
     if (!authStore.canEdit) {
@@ -178,6 +275,11 @@ export const useDocumentsStore = defineStore('documents', () => {
       error.value = message
       throw e
     }
+  }
+
+  // Update document priority
+  async function updatePriority(id: string, priority: 1 | 2 | 3) {
+    await updateDocument(id, { priority })
   }
 
   async function deleteDocument(id: string) {
@@ -232,25 +334,66 @@ export const useDocumentsStore = defineStore('documents', () => {
   // Get category badge class
   function getCategoryBadgeClass(category: DocumentCategory): string {
     switch (category) {
+      // Knowledge categories
+      case 'strategy':
+        return 'badge-indigo'
+      case 'brand':
+        return 'badge-purple'
       case 'research':
         return 'badge-blue'
-      case 'design':
-        return 'badge-purple'
       case 'technical':
         return 'badge-gray'
-      case 'business':
+      case 'process':
         return 'badge-green'
-      case 'legal':
-        return 'badge-red'
-      case 'other':
+      case 'reference':
         return 'badge-yellow'
+      // Inspiration categories
+      case 'ux-pattern':
+        return 'badge-pink'
+      case 'competitor':
+        return 'badge-red'
+      case 'article':
+        return 'badge-blue'
+      case 'visual':
+        return 'badge-purple'
+      case 'product':
+        return 'badge-teal'
+      case 'other':
+        return 'badge-gray'
       default:
         return 'badge-gray'
     }
   }
 
+  // Get priority label
+  function getPriorityLabel(priority: 1 | 2 | 3): string {
+    switch (priority) {
+      case 1:
+        return 'High'
+      case 2:
+        return 'Medium'
+      case 3:
+        return 'Low'
+    }
+  }
+
+  // Get priority badge class
+  function getPriorityBadgeClass(priority: 1 | 2 | 3): string {
+    switch (priority) {
+      case 1:
+        return 'bg-amber-100 text-amber-700'
+      case 2:
+        return 'bg-slate-100 text-slate-600'
+      case 3:
+        return 'bg-gray-100 text-gray-500'
+    }
+  }
+
   return {
     documents,
+    knowledgeDocuments,
+    inspirationDocuments,
+    priorityKnowledgeDocs,
     allTags,
     loading,
     uploading,
@@ -259,12 +402,18 @@ export const useDocumentsStore = defineStore('documents', () => {
     subscribe,
     unsubscribe: unsubscribeFromDocuments,
     getDocumentsByCategory,
+    getDocumentsByTypeAndCategory,
+    getTagsByType,
     searchDocuments,
     uploadDocument,
+    addInspirationLink,
     updateDocument,
+    updatePriority,
     deleteDocument,
     formatFileSize,
     getFileIcon,
     getCategoryBadgeClass,
+    getPriorityLabel,
+    getPriorityBadgeClass,
   }
 })

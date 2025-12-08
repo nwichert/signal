@@ -21,24 +21,59 @@ interface NavItem {
   roles: ('cpo' | 'team' | 'leadership')[]
 }
 
-const navItems: NavItem[] = [
-  { name: 'Dashboard', path: '/', icon: 'home', roles: ['cpo', 'team', 'leadership'] },
-  { name: 'Vision & Principles', path: '/vision', icon: 'star', roles: ['cpo', 'team', 'leadership'] },
-  { name: 'Focus Areas', path: '/focus-areas', icon: 'target', roles: ['cpo', 'team', 'leadership'] },
-  { name: 'Strategic Context', path: '/strategic-context', icon: 'compass', roles: ['cpo', 'team'] },
-  { name: 'Team Objectives', path: '/objectives', icon: 'flag', roles: ['cpo', 'team'] },
-  { name: 'Customer Archetypes', path: '/customer-archetypes', icon: 'users', roles: ['cpo', 'team'] },
-  { name: 'Discovery Hub', path: '/discovery', icon: 'search', roles: ['cpo', 'team'] },
-  { name: 'Delivery Tracker', path: '/delivery', icon: 'truck', roles: ['cpo', 'team'] },
-  { name: 'Decisions Log', path: '/decisions', icon: 'clipboard', roles: ['cpo', 'team'] },
-  { name: 'Documents', path: '/documents', icon: 'folder', roles: ['cpo', 'team'] },
-  { name: 'Idea Hopper', path: '/idea-hopper', icon: 'lightbulb', roles: ['cpo', 'team'] },
-  { name: 'Journey Maps', path: '/journey-maps', icon: 'map', roles: ['cpo', 'team'] },
+interface NavSection {
+  label: string
+  items: NavItem[]
+}
+
+const navSections: NavSection[] = [
+  {
+    label: '',
+    items: [
+      { name: 'Dashboard', path: '/', icon: 'home', roles: ['cpo', 'team', 'leadership'] },
+    ]
+  },
+  {
+    label: 'Strategy',
+    items: [
+      { name: 'Vision & Principles', path: '/vision', icon: 'star', roles: ['cpo', 'team', 'leadership'] },
+      { name: 'Strategic Context', path: '/strategic-context', icon: 'compass', roles: ['cpo', 'team'] },
+      { name: 'Focus Areas', path: '/focus-areas', icon: 'target', roles: ['cpo', 'team', 'leadership'] },
+      { name: 'Team Objectives', path: '/objectives', icon: 'flag', roles: ['cpo', 'team'] },
+    ]
+  },
+  {
+    label: 'Discovery',
+    items: [
+      { name: 'Customer Archetypes', path: '/customer-archetypes', icon: 'users', roles: ['cpo', 'team'] },
+      { name: 'Discovery Hub', path: '/discovery', icon: 'search', roles: ['cpo', 'team'] },
+      { name: 'Journey Maps', path: '/journey-maps', icon: 'map', roles: ['cpo', 'team'] },
+    ]
+  },
+  {
+    label: 'Ideation',
+    items: [
+      { name: 'Idea Hopper', path: '/idea-hopper', icon: 'lightbulb', roles: ['cpo', 'team'] },
+      { name: 'Decisions Log', path: '/decisions', icon: 'clipboard', roles: ['cpo', 'team'] },
+    ]
+  },
+  {
+    label: 'Execution',
+    items: [
+      { name: 'Delivery Tracker', path: '/delivery', icon: 'truck', roles: ['cpo', 'team'] },
+      { name: 'Knowledge', path: '/documents', icon: 'book', roles: ['cpo', 'team'] },
+    ]
+  },
 ]
 
-const visibleNavItems = computed(() => {
+const visibleSections = computed(() => {
   if (!authStore.role) return []
-  return navItems.filter((item) => item.roles.includes(authStore.role!))
+  return navSections
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => item.roles.includes(authStore.role!))
+    }))
+    .filter(section => section.items.length > 0)
 })
 
 function isActive(path: string): boolean {
@@ -59,6 +94,7 @@ const iconPaths: Record<string, string> = {
   lightbulb: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z',
   map: 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7',
   users: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z',
+  book: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
 }
 </script>
 
@@ -99,39 +135,64 @@ const iconPaths: Record<string, string> = {
     </div>
 
     <!-- Navigation -->
-    <nav class="flex-1 py-4 space-y-1 overflow-y-auto">
-      <RouterLink
-        v-for="item in visibleNavItems"
-        :key="item.path"
-        :to="item.path"
-        :class="[
-          'flex items-center mx-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
-          isActive(item.path)
-            ? 'bg-accent-600 text-white'
-            : 'text-gray-300 hover:bg-gray-800 hover:text-white',
-        ]"
-        :title="collapsed ? item.name : undefined"
-      >
-        <svg
-          class="w-5 h-5 flex-shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
+    <nav class="flex-1 py-2 overflow-y-auto">
+      <template v-for="(section, sectionIndex) in visibleSections" :key="section.label || 'main'">
+        <!-- Section divider with label -->
+        <div
+          v-if="section.label"
+          :class="[
+            'flex items-center px-4 mt-4 mb-2',
+            sectionIndex > 0 ? 'pt-3 border-t border-gray-800' : ''
+          ]"
         >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            :d="iconPaths[item.icon]"
+          <span
+            v-if="!collapsed"
+            class="text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+          >
+            {{ section.label }}
+          </span>
+          <div
+            v-else
+            class="w-full h-px bg-gray-700"
           />
-        </svg>
-        <span
-          v-if="!collapsed"
-          class="ml-3 truncate"
-        >
-          {{ item.name }}
-        </span>
-      </RouterLink>
+        </div>
+
+        <!-- Section items -->
+        <div class="space-y-0.5">
+          <RouterLink
+            v-for="item in section.items"
+            :key="item.path"
+            :to="item.path"
+            :class="[
+              'flex items-center mx-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+              isActive(item.path)
+                ? 'bg-accent-600 text-white'
+                : 'text-gray-300 hover:bg-gray-800 hover:text-white',
+            ]"
+            :title="collapsed ? item.name : undefined"
+          >
+            <svg
+              class="w-5 h-5 flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                :d="iconPaths[item.icon]"
+              />
+            </svg>
+            <span
+              v-if="!collapsed"
+              class="ml-3 truncate"
+            >
+              {{ item.name }}
+            </span>
+          </RouterLink>
+        </div>
+      </template>
     </nav>
 
     <!-- User info -->

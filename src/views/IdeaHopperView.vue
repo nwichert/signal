@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useIdeasStore } from '@/stores/ideas'
 import { useFocusAreasStore } from '@/stores/focusAreas'
+import { useCustomerArchetypesStore } from '@/stores/customerArchetypes'
+import { useJourneyMapsStore } from '@/stores/journeyMaps'
 import type { Idea, JobType, IdeaStatus, JobToBeDone } from '@/types'
+import ConnectionBadge from '@/components/ConnectionBadge.vue'
 
 const authStore = useAuthStore()
 const ideasStore = useIdeasStore()
 const focusAreasStore = useFocusAreasStore()
+const archetypesStore = useCustomerArchetypesStore()
+const journeyMapsStore = useJourneyMapsStore()
 
 const showAddForm = ref(false)
 const editingId = ref<string | null>(null)
@@ -25,6 +31,7 @@ const defaultForm = {
   } as JobToBeDone,
   notes: '',
   focusAreaId: '',
+  targetArchetypeId: '',
 }
 
 const form = ref({ ...defaultForm })
@@ -32,11 +39,15 @@ const form = ref({ ...defaultForm })
 onMounted(() => {
   ideasStore.subscribe()
   focusAreasStore.subscribe()
+  archetypesStore.subscribe()
+  journeyMapsStore.subscribe()
 })
 
 onUnmounted(() => {
   ideasStore.unsubscribe()
   focusAreasStore.unsubscribe()
+  archetypesStore.unsubscribe()
+  journeyMapsStore.unsubscribe()
 })
 
 const filteredIdeas = computed(() => {
@@ -69,6 +80,7 @@ async function handleSubmit() {
     job: form.value.job,
     notes: form.value.notes || undefined,
     focusAreaId: form.value.focusAreaId || undefined,
+    targetArchetypeId: form.value.targetArchetypeId || undefined,
   }
 
   if (editingId.value) {
@@ -87,6 +99,7 @@ function startEditing(idea: Idea) {
     job: { ...idea.job },
     notes: idea.notes || '',
     focusAreaId: idea.focusAreaId || '',
+    targetArchetypeId: idea.targetArchetypeId || '',
   }
   showAddForm.value = true
 }
@@ -135,8 +148,24 @@ function getFocusAreaTitle(id: string): string {
   return fa?.title || 'Unknown'
 }
 
+function getArchetypeName(id?: string): string | null {
+  if (!id) return null
+  const arch = archetypesStore.archetypes.find((a) => a.id === id)
+  return arch?.name || null
+}
+
 function formatJobStatement(job: JobToBeDone): string {
   return `${job.customer} wants to ${job.progress} when ${job.circumstance}`
+}
+
+// Get connection counts for an idea
+function getConnectionCounts(ideaId: string) {
+  const idea = ideasStore.getIdeaById(ideaId)
+  return {
+    focusArea: idea?.focusAreaId ? 1 : 0,
+    archetype: idea?.targetArchetypeId ? 1 : 0,
+    journeyMaps: journeyMapsStore.getJourneyMapsForIdea(ideaId).length,
+  }
 }
 </script>
 
@@ -270,13 +299,27 @@ function formatJobStatement(job: JobToBeDone): string {
           </select>
         </div>
         <div>
-          <label class="label">Notes (optional)</label>
-          <input
-            v-model="form.notes"
-            class="input"
-            placeholder="Additional context or notes"
-          />
+          <label class="label">Target Customer Archetype (optional)</label>
+          <select v-model="form.targetArchetypeId" class="input">
+            <option value="">None</option>
+            <option
+              v-for="arch in archetypesStore.activeArchetypes"
+              :key="arch.id"
+              :value="arch.id"
+            >
+              {{ arch.name }}
+            </option>
+          </select>
         </div>
+      </div>
+
+      <div>
+        <label class="label">Notes (optional)</label>
+        <input
+          v-model="form.notes"
+          class="input"
+          placeholder="Additional context or notes"
+        />
       </div>
 
       <div class="flex gap-2 justify-end pt-2">
@@ -333,10 +376,10 @@ function formatJobStatement(job: JobToBeDone): string {
           >
             <div class="flex items-start justify-between gap-4">
               <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
                   <svg
                     :class="[
-                      'w-4 h-4 text-gray-400 transition-transform',
+                      'w-4 h-4 text-gray-400 transition-transform flex-shrink-0',
                       expandedIdeaId === idea.id ? 'rotate-90' : '',
                     ]"
                     fill="none"
@@ -348,6 +391,24 @@ function formatJobStatement(job: JobToBeDone): string {
                   <h3 class="font-medium text-gray-900 truncate">{{ idea.title }}</h3>
                   <span :class="getStatusBadgeClass(idea.status)">{{ idea.status }}</span>
                   <span :class="getJobTypeBadgeClass(idea.job.type)">{{ idea.job.type }}</span>
+                  <!-- Connection badges -->
+                  <div class="flex gap-1 ml-1">
+                    <ConnectionBadge
+                      v-if="getConnectionCounts(idea.id).archetype > 0"
+                      :count="getConnectionCounts(idea.id).archetype"
+                      type="archetype"
+                    />
+                    <ConnectionBadge
+                      v-if="getConnectionCounts(idea.id).focusArea > 0"
+                      :count="getConnectionCounts(idea.id).focusArea"
+                      type="focus-area"
+                    />
+                    <ConnectionBadge
+                      v-if="getConnectionCounts(idea.id).journeyMaps > 0"
+                      :count="getConnectionCounts(idea.id).journeyMaps"
+                      type="journey-map"
+                    />
+                  </div>
                 </div>
                 <p class="text-sm text-gray-600 pl-6 truncate">
                   {{ formatJobStatement(idea.job) }}
@@ -410,10 +471,72 @@ function formatJobStatement(job: JobToBeDone): string {
                   </div>
                 </div>
 
-                <!-- Focus Area link -->
-                <div v-if="idea.focusAreaId" class="text-sm">
-                  <span class="font-medium text-gray-600">Focus Area:</span>
-                  <span class="text-indigo-600 ml-1">{{ getFocusAreaTitle(idea.focusAreaId) }}</span>
+                <!-- Connections grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <!-- Focus Area link -->
+                  <div>
+                    <div class="flex items-center gap-2 mb-2">
+                      <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                      <span class="text-sm font-medium text-gray-700">Focus Area</span>
+                    </div>
+                    <RouterLink
+                      v-if="idea.focusAreaId"
+                      to="/focus-areas"
+                      class="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      <span class="text-sm">{{ getFocusAreaTitle(idea.focusAreaId) }}</span>
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </RouterLink>
+                    <span v-else class="text-sm text-gray-400 italic">Not linked</span>
+                  </div>
+
+                  <!-- Archetype link -->
+                  <div>
+                    <div class="flex items-center gap-2 mb-2">
+                      <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span class="text-sm font-medium text-gray-700">Target Archetype</span>
+                    </div>
+                    <RouterLink
+                      v-if="getArchetypeName(idea.targetArchetypeId)"
+                      to="/customer-archetypes"
+                      class="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors"
+                    >
+                      <span class="text-sm">{{ getArchetypeName(idea.targetArchetypeId) }}</span>
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </RouterLink>
+                    <span v-else class="text-sm text-gray-400 italic">Not linked</span>
+                  </div>
+                </div>
+
+                <!-- Journey Maps -->
+                <div v-if="journeyMapsStore.getJourneyMapsForIdea(idea.id).length > 0" class="mt-3 pt-3 border-t">
+                  <div class="flex items-center gap-2 mb-2">
+                    <svg class="w-4 h-4 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                    </svg>
+                    <span class="text-sm font-medium text-gray-700">Journey Maps ({{ journeyMapsStore.getJourneyMapsForIdea(idea.id).length }})</span>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <RouterLink
+                      v-for="jm in journeyMapsStore.getJourneyMapsForIdea(idea.id)"
+                      :key="jm.id"
+                      to="/journey-maps"
+                      class="inline-flex items-center gap-1 px-2 py-1 bg-teal-50 text-teal-700 text-sm rounded hover:bg-teal-100 transition-colors"
+                    >
+                      {{ jm.title }}
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </RouterLink>
+                  </div>
                 </div>
 
                 <!-- Notes -->
