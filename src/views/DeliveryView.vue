@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDeliveryStore } from '@/stores/delivery'
+import { useDiscoveryStore } from '@/stores/discovery'
+import { useFocusAreasStore } from '@/stores/focusAreas'
 
 const authStore = useAuthStore()
 const deliveryStore = useDeliveryStore()
+const discoveryStore = useDiscoveryStore()
+const focusAreasStore = useFocusAreasStore()
 
 const showAddChangelog = ref(false)
 const showAddBlocker = ref(false)
+const expandedEntryId = ref<string | null>(null)
+const linkingHypothesesForEntry = ref<string | null>(null)
+const selectedHypothesisIds = ref<string[]>([])
 
 type EntryType = 'feature' | 'fix' | 'improvement' | 'technical'
 
@@ -15,6 +23,8 @@ const changelogForm = ref({
   title: '',
   description: '',
   type: 'feature' as EntryType,
+  focusAreaId: '',
+  validatedHypothesisIds: [] as string[],
 })
 
 const blockerForm = ref({
@@ -32,10 +42,14 @@ const entryTypes: { value: EntryType; label: string; class: string }[] = [
 
 onMounted(() => {
   deliveryStore.subscribe()
+  discoveryStore.subscribe()
+  focusAreasStore.subscribe()
 })
 
 onUnmounted(() => {
   deliveryStore.unsubscribe()
+  discoveryStore.unsubscribe()
+  focusAreasStore.unsubscribe()
 })
 
 async function handleSubmitChangelog() {
@@ -43,8 +57,12 @@ async function handleSubmitChangelog() {
     title: changelogForm.value.title,
     description: changelogForm.value.description,
     type: changelogForm.value.type,
+    focusAreaId: changelogForm.value.focusAreaId || undefined,
+    validatedHypothesisIds: changelogForm.value.validatedHypothesisIds.length > 0
+      ? changelogForm.value.validatedHypothesisIds
+      : undefined,
   })
-  changelogForm.value = { title: '', description: '', type: 'feature' }
+  changelogForm.value = { title: '', description: '', type: 'feature', focusAreaId: '', validatedHypothesisIds: [] }
   showAddChangelog.value = false
 }
 
@@ -89,6 +107,81 @@ function formatDate(timestamp: { toDate: () => Date } | null) {
     year: 'numeric',
   })
 }
+
+function toggleExpandEntry(id: string) {
+  expandedEntryId.value = expandedEntryId.value === id ? null : id
+}
+
+// Toggle hypothesis selection in form
+function toggleHypothesisInForm(hypothesisId: string) {
+  const idx = changelogForm.value.validatedHypothesisIds.indexOf(hypothesisId)
+  if (idx >= 0) {
+    changelogForm.value.validatedHypothesisIds.splice(idx, 1)
+  } else {
+    changelogForm.value.validatedHypothesisIds.push(hypothesisId)
+  }
+}
+
+// Linking functions for existing entries
+function startLinkingHypotheses(entryId: string) {
+  const entry = deliveryStore.changelog.find(c => c.id === entryId)
+  linkingHypothesesForEntry.value = entryId
+  selectedHypothesisIds.value = entry?.validatedHypothesisIds ? [...entry.validatedHypothesisIds] : []
+}
+
+function cancelLinkingHypotheses() {
+  linkingHypothesesForEntry.value = null
+  selectedHypothesisIds.value = []
+}
+
+function toggleHypothesisSelection(hypothesisId: string) {
+  const idx = selectedHypothesisIds.value.indexOf(hypothesisId)
+  if (idx >= 0) {
+    selectedHypothesisIds.value.splice(idx, 1)
+  } else {
+    selectedHypothesisIds.value.push(hypothesisId)
+  }
+}
+
+async function saveLinkHypotheses(entryId: string) {
+  await deliveryStore.updateChangelogEntry(entryId, {
+    validatedHypothesisIds: selectedHypothesisIds.value,
+  })
+  linkingHypothesesForEntry.value = null
+  selectedHypothesisIds.value = []
+}
+
+function getHypothesisBelief(id: string) {
+  const hypothesis = discoveryStore.hypotheses.find(h => h.id === id)
+  return hypothesis?.belief || 'Unknown hypothesis'
+}
+
+function getHypothesisStatus(id: string) {
+  const hypothesis = discoveryStore.hypotheses.find(h => h.id === id)
+  return hypothesis?.status || 'unknown'
+}
+
+function getFocusAreaTitle(id?: string) {
+  if (!id) return null
+  const fa = focusAreasStore.focusAreas.find(f => f.id === id)
+  return fa?.title
+}
+
+function getStatusBadgeClass(status: string) {
+  switch (status) {
+    case 'active':
+      return 'badge-blue'
+    case 'validated':
+      return 'badge-green'
+    case 'invalidated':
+      return 'badge-red'
+    case 'parked':
+      return 'badge-gray'
+    default:
+      return 'badge-gray'
+  }
+}
+
 </script>
 
 <template>
@@ -145,6 +238,59 @@ function formatDate(timestamp: { toDate: () => Date } | null) {
         </div>
       </div>
 
+      <div>
+        <label class="label">Related Focus Area (Optional)</label>
+        <select v-model="changelogForm.focusAreaId" class="input">
+          <option value="">None</option>
+          <option
+            v-for="fa in focusAreasStore.activeFocusAreas"
+            :key="fa.id"
+            :value="fa.id"
+          >
+            {{ fa.title }}
+          </option>
+        </select>
+      </div>
+
+      <div>
+        <label class="label">Validated Hypotheses (Optional)</label>
+        <p class="text-xs text-gray-500 mb-2">Link this release to hypotheses it validates</p>
+        <div v-if="discoveryStore.validatedHypotheses.length > 0" class="space-y-2 max-h-48 overflow-y-auto">
+          <div
+            v-for="hypothesis in discoveryStore.validatedHypotheses"
+            :key="hypothesis.id"
+            :class="[
+              'p-3 rounded-lg border-2 cursor-pointer transition-colors',
+              changelogForm.validatedHypothesisIds.includes(hypothesis.id)
+                ? 'border-green-500 bg-green-50'
+                : 'border-gray-200 hover:border-gray-300'
+            ]"
+            @click="toggleHypothesisInForm(hypothesis.id)"
+          >
+            <div class="flex items-start gap-2">
+              <div
+                :class="[
+                  'w-4 h-4 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center',
+                  changelogForm.validatedHypothesisIds.includes(hypothesis.id) ? 'border-green-500 bg-green-500' : 'border-gray-300'
+                ]"
+              >
+                <svg
+                  v-if="changelogForm.validatedHypothesisIds.includes(hypothesis.id)"
+                  class="w-3 h-3 text-white"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <p class="text-sm text-gray-900">{{ hypothesis.belief }}</p>
+            </div>
+          </div>
+        </div>
+        <p v-else class="text-sm text-gray-400 italic">No validated hypotheses available to link.</p>
+      </div>
+
       <div class="flex gap-2 justify-end pt-2">
         <button class="btn-ghost" @click="showAddChangelog = false">Cancel</button>
         <button
@@ -175,29 +321,154 @@ function formatDate(timestamp: { toDate: () => Date } | null) {
           <div
             v-for="entry in deliveryStore.changelog"
             :key="entry.id"
-            class="card p-4 group"
+            class="card overflow-hidden group"
           >
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <span :class="getTypeBadgeClass(entry.type)">{{ entry.type }}</span>
-                  <span class="text-xs text-gray-400">{{ formatDate(entry.shippedAt) }}</span>
+            <!-- Entry Header - Clickable to expand -->
+            <div
+              class="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+              @click="toggleExpandEntry(entry.id)"
+            >
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-1 flex-wrap">
+                    <svg
+                      :class="['w-4 h-4 text-gray-400 transition-transform flex-shrink-0', expandedEntryId === entry.id ? 'rotate-90' : '']"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span :class="getTypeBadgeClass(entry.type)">{{ entry.type }}</span>
+                    <span class="text-xs text-gray-400">{{ formatDate(entry.shippedAt) }}</span>
+                    <span v-if="entry.validatedHypothesisIds && entry.validatedHypothesisIds.length > 0" class="badge-green" title="Linked to validated hypotheses">
+                      {{ entry.validatedHypothesisIds.length }} hypothesis{{ entry.validatedHypothesisIds.length !== 1 ? 'es' : '' }}
+                    </span>
+                    <span v-if="entry.focusAreaId" class="badge-indigo" title="Linked to focus area">
+                      focus
+                    </span>
+                  </div>
+                  <h3 class="font-medium text-gray-900 ml-6">{{ entry.title }}</h3>
+                  <p v-if="entry.description" class="text-sm text-gray-600 mt-1 ml-6">
+                    {{ entry.description }}
+                  </p>
                 </div>
-                <h3 class="font-medium text-gray-900">{{ entry.title }}</h3>
-                <p v-if="entry.description" class="text-sm text-gray-600 mt-1">
-                  {{ entry.description }}
-                </p>
+
+                <button
+                  v-if="authStore.canEdit"
+                  class="p-1.5 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100"
+                  @click.stop="handleDeleteChangelog(entry.id)"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Expanded Content -->
+            <div v-if="expandedEntryId === entry.id" class="border-t bg-gray-50 p-4 space-y-4">
+              <!-- Related Focus Area -->
+              <div v-if="entry.focusAreaId">
+                <h4 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Related Focus Area</h4>
+                <RouterLink
+                  to="/focus-areas"
+                  class="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md text-sm hover:bg-indigo-100 transition-colors"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                  {{ getFocusAreaTitle(entry.focusAreaId) || 'View Focus Area' }}
+                </RouterLink>
               </div>
 
-              <button
-                v-if="authStore.canEdit"
-                class="p-1.5 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100"
-                @click="handleDeleteChangelog(entry.id)"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
+              <!-- Linked Hypotheses -->
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                    Validated Hypotheses Shipped
+                  </h4>
+                  <button
+                    v-if="authStore.canEdit && linkingHypothesesForEntry !== entry.id"
+                    class="text-xs text-green-600 hover:text-green-700"
+                    @click.stop="startLinkingHypotheses(entry.id)"
+                  >
+                    + Link Hypotheses
+                  </button>
+                </div>
+
+                <!-- Linking UI -->
+                <div v-if="linkingHypothesesForEntry === entry.id" class="p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
+                  <p class="text-sm text-gray-600">Select validated hypotheses that this release ships:</p>
+
+                  <div class="max-h-64 overflow-y-auto space-y-2">
+                    <div
+                      v-for="hypothesis in discoveryStore.validatedHypotheses"
+                      :key="hypothesis.id"
+                      :class="[
+                        'p-3 rounded-lg border-2 cursor-pointer transition-colors bg-white',
+                        selectedHypothesisIds.includes(hypothesis.id)
+                          ? 'border-green-500'
+                          : 'border-gray-200 hover:border-gray-300'
+                      ]"
+                      @click="toggleHypothesisSelection(hypothesis.id)"
+                    >
+                      <div class="flex items-start gap-2">
+                        <div
+                          :class="[
+                            'w-4 h-4 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center',
+                            selectedHypothesisIds.includes(hypothesis.id) ? 'border-green-500 bg-green-500' : 'border-gray-300'
+                          ]"
+                        >
+                          <svg
+                            v-if="selectedHypothesisIds.includes(hypothesis.id)"
+                            class="w-3 h-3 text-white"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <p class="text-sm text-gray-900">{{ hypothesis.belief }}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="discoveryStore.validatedHypotheses.length === 0" class="text-sm text-gray-500 text-center py-4">
+                    No validated hypotheses available. Validate hypotheses in the Discovery Hub first.
+                  </div>
+
+                  <div class="flex gap-2 justify-end pt-2">
+                    <button class="btn-ghost text-sm" @click.stop="cancelLinkingHypotheses">Cancel</button>
+                    <button
+                      class="btn-primary text-sm"
+                      @click.stop="saveLinkHypotheses(entry.id)"
+                    >
+                      Save Links ({{ selectedHypothesisIds.length }} selected)
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Display linked hypotheses -->
+                <div v-else-if="entry.validatedHypothesisIds && entry.validatedHypothesisIds.length > 0" class="space-y-2">
+                  <RouterLink
+                    v-for="hypId in entry.validatedHypothesisIds"
+                    :key="hypId"
+                    to="/discovery"
+                    class="block p-3 bg-white rounded-lg border border-gray-200 hover:border-green-300 transition-colors"
+                  >
+                    <div class="flex items-center gap-2 mb-1">
+                      <span :class="getStatusBadgeClass(getHypothesisStatus(hypId))">{{ getHypothesisStatus(hypId) }}</span>
+                    </div>
+                    <p class="text-sm text-gray-700">{{ getHypothesisBelief(hypId) }}</p>
+                  </RouterLink>
+                </div>
+
+                <p v-else class="text-sm text-gray-400 italic">
+                  No hypotheses linked yet. Link validated hypotheses to track what evidence this release ships.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -348,3 +619,21 @@ function formatDate(timestamp: { toDate: () => Date } | null) {
     </template>
   </div>
 </template>
+
+<style scoped>
+.badge-green {
+  @apply px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-700;
+}
+.badge-red {
+  @apply px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-700;
+}
+.badge-blue {
+  @apply px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700;
+}
+.badge-gray {
+  @apply px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700;
+}
+.badge-indigo {
+  @apply px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-100 text-indigo-700;
+}
+</style>

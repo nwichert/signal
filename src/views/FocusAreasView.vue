@@ -73,8 +73,10 @@ onUnmounted(() => {
 })
 
 // Get related items for a focus area
+type RelatedItemType = 'hypothesis' | 'feedback' | 'journey-map' | 'document' | 'changelog' | 'archetype' | 'focus-area' | 'idea' | 'decision' | 'objective' | 'blocker'
+
 function getRelatedItems(focusAreaId: string) {
-  const items: { id: string; type: string; title: string; status?: string; path?: string }[] = []
+  const items: { id: string; type: RelatedItemType; title: string; status?: string; path?: string }[] = []
 
   // Archetypes linked to this focus area
   archetypesStore.archetypes

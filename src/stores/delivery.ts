@@ -85,6 +85,8 @@ export const useDeliveryStore = defineStore('delivery', () => {
     title: string
     description: string
     type: 'feature' | 'fix' | 'improvement' | 'technical'
+    focusAreaId?: string
+    validatedHypothesisIds?: string[]
   }) {
     const authStore = useAuthStore()
     if (!authStore.canEdit) {
@@ -95,11 +97,23 @@ export const useDeliveryStore = defineStore('delivery', () => {
     error.value = null
 
     try {
-      await addDoc(collection(db, 'changelog'), {
-        ...data,
+      const entryData: Record<string, unknown> = {
+        title: data.title,
+        description: data.description,
+        type: data.type,
         shippedAt: serverTimestamp(),
         createdBy: authStore.user?.id,
-      })
+      }
+
+      // Add optional fields only if they have values
+      if (data.focusAreaId) {
+        entryData.focusAreaId = data.focusAreaId
+      }
+      if (data.validatedHypothesisIds && data.validatedHypothesisIds.length > 0) {
+        entryData.validatedHypothesisIds = data.validatedHypothesisIds
+      }
+
+      await addDoc(collection(db, 'changelog'), entryData)
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to add changelog entry'
       error.value = message
@@ -107,6 +121,35 @@ export const useDeliveryStore = defineStore('delivery', () => {
     } finally {
       saving.value = false
     }
+  }
+
+  async function updateChangelogEntry(id: string, data: {
+    title?: string
+    description?: string
+    type?: 'feature' | 'fix' | 'improvement' | 'technical'
+    focusAreaId?: string
+    validatedHypothesisIds?: string[]
+  }) {
+    const authStore = useAuthStore()
+    if (!authStore.canEdit) {
+      throw new Error('Not authorized')
+    }
+
+    try {
+      const docRef = doc(db, 'changelog', id)
+      await updateDoc(docRef, data)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to update changelog entry'
+      error.value = message
+      throw e
+    }
+  }
+
+  // Get changelog entries linked to a specific hypothesis
+  function getChangelogForHypothesis(hypothesisId: string) {
+    return changelog.value.filter(c =>
+      c.validatedHypothesisIds?.includes(hypothesisId)
+    )
   }
 
   async function deleteChangelogEntry(id: string) {
@@ -216,6 +259,8 @@ export const useDeliveryStore = defineStore('delivery', () => {
     subscribe,
     unsubscribe: unsubscribeFromDelivery,
     addChangelogEntry,
+    updateChangelogEntry,
+    getChangelogForHypothesis,
     deleteChangelogEntry,
     addBlocker,
     resolveBlocker,

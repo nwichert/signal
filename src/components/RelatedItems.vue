@@ -103,7 +103,7 @@ const groupedItems = computed(() => {
     if (!groups[item.type]) {
       groups[item.type] = []
     }
-    groups[item.type].push(item)
+    groups[item.type]!.push(item)
   })
   return groups
 })

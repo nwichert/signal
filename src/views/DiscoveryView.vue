@@ -158,21 +158,14 @@ async function handleSubmitHypothesis() {
   resetHypothesisForm()
 }
 
-function startEditingHypothesis(h: Hypothesis) {
-  editingHypothesis.value = h
-  hypothesisForm.value = {
-    belief: h.belief,
-    test: h.test,
-    result: h.result || '',
-    risks: [...h.risks],
-    focusAreaId: h.focusAreaId || '',
-    archetypeId: h.archetypeId || '',
-  }
-  showAddHypothesis.value = true
-}
-
 async function updateStatus(id: string, status: HypothesisStatus) {
-  await discoveryStore.updateHypothesis(id, { status })
+  // Use the new updateHypothesisStatus for validated/invalidated to auto-generate decisions
+  if (status === 'validated' || status === 'invalidated') {
+    await discoveryStore.updateHypothesisStatus(id, status)
+  } else {
+    // For parked/active, just update the status directly
+    await discoveryStore.updateHypothesis(id, { status })
+  }
 }
 
 async function handleDeleteHypothesis(id: string) {
@@ -277,8 +270,10 @@ function toggleInlineRisk(risk: RiskType) {
 }
 
 // Get related items for a hypothesis
+type RelatedItemType = 'hypothesis' | 'feedback' | 'journey-map' | 'document' | 'changelog' | 'archetype' | 'focus-area' | 'idea' | 'decision' | 'objective' | 'blocker'
+
 function getRelatedItems(hypothesisId: string) {
-  const items: { id: string; type: string; title: string; status?: string; path?: string }[] = []
+  const items: { id: string; type: RelatedItemType; title: string; status?: string; path?: string }[] = []
   const hypothesis = discoveryStore.hypotheses.find(h => h.id === hypothesisId)
 
   // Focus Area
@@ -1032,25 +1027,6 @@ function getPriorityBadgeClass(priority: string) {
               </div>
             </Transition>
             </template>
-          </div>
-        </div>
-      </section>
-
-      <!-- 3-Risk Framework Legend -->
-      <section class="card p-4">
-        <h3 class="text-sm font-medium text-gray-700 mb-3">3-Risk Framework</h3>
-        <div class="grid grid-cols-3 gap-3 text-xs">
-          <div>
-            <span class="badge-pink">Desirable</span>
-            <p class="text-gray-500 mt-1">Do customers want this?</p>
-          </div>
-          <div>
-            <span class="badge-yellow">Feasible</span>
-            <p class="text-gray-500 mt-1">Can we build it?</p>
-          </div>
-          <div>
-            <span class="badge-green">Viable</span>
-            <p class="text-gray-500 mt-1">Does it work for business?</p>
           </div>
         </div>
       </section>

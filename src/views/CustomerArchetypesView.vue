@@ -380,7 +380,7 @@ async function saveInterviewWithInsights() {
 }
 
 // Apply hypothesis validation from transcript analysis
-async function applyHypothesisValidation(validation: NonNullable<typeof transcriptAnalysis.value>['hypothesisValidations'][number], index: number) {
+async function applyHypothesisValidation(validation: NonNullable<NonNullable<typeof transcriptAnalysis.value>['hypothesisValidations']>[number], index: number) {
   if (!selectedArchetypeId.value || !transcriptAnalysis.value?.hypothesisValidations) return
 
   if (validation.hypothesisId) {
@@ -396,23 +396,24 @@ async function applyHypothesisValidation(validation: NonNullable<typeof transcri
   }
 
   // Mark as applied
-  transcriptAnalysis.value.hypothesisValidations[index].applied = true
+  transcriptAnalysis.value.hypothesisValidations![index]!.applied = true
 }
 
 // Apply all hypothesis validations
 async function applyAllValidations() {
   if (!transcriptAnalysis.value?.hypothesisValidations) return
 
-  for (let i = 0; i < transcriptAnalysis.value.hypothesisValidations.length; i++) {
-    const validation = transcriptAnalysis.value.hypothesisValidations[i]
-    if (!validation.applied && validation.hypothesisId) {
+  const validations = transcriptAnalysis.value.hypothesisValidations
+  for (let i = 0; i < validations.length; i++) {
+    const validation = validations[i]
+    if (validation && !validation.applied && validation.hypothesisId) {
       await applyHypothesisValidation(validation, i)
     }
   }
 }
 
 // Add new hypothesis from transcript analysis
-async function addNewHypothesisFromTranscript(hyp: NonNullable<typeof transcriptAnalysis.value>['newHypotheses'][number], index: number) {
+async function addNewHypothesisFromTranscript(hyp: NonNullable<NonNullable<typeof transcriptAnalysis.value>['newHypotheses']>[number], index: number) {
   if (!selectedArchetypeId.value || !transcriptAnalysis.value?.newHypotheses) return
 
   const fieldMap: Record<string, keyof typeof hypothesisInputs.value> = {
@@ -428,7 +429,7 @@ async function addNewHypothesisFromTranscript(hyp: NonNullable<typeof transcript
   await store.addHypothesis(selectedArchetypeId.value, field, hyp.content)
 
   // Mark as added
-  transcriptAnalysis.value.newHypotheses[index].added = true
+  transcriptAnalysis.value.newHypotheses![index]!.added = true
 }
 
 // Apply profile updates from transcript analysis
@@ -733,16 +734,17 @@ async function addAssumptionAsHypothesis(assumption: AiAssumption, index: number
   }
 
   // Mark as added
-  aiResponse.value.rawData.assumptions[index].added = true
+  aiResponse.value.rawData!.assumptions![index]!.added = true
 }
 
 // Add all assumptions at once
 async function addAllAssumptions() {
   if (!selectedArchetypeId.value || !aiResponse.value?.rawData?.assumptions) return
 
-  for (let i = 0; i < aiResponse.value.rawData.assumptions.length; i++) {
-    const assumption = aiResponse.value.rawData.assumptions[i]
-    if (!assumption.added) {
+  const assumptions = aiResponse.value.rawData.assumptions
+  for (let i = 0; i < assumptions.length; i++) {
+    const assumption = assumptions[i]
+    if (assumption && !assumption.added) {
       await addAssumptionAsHypothesis(assumption, i)
     }
   }
@@ -755,16 +757,17 @@ async function addAiQuestion(question: AiQuestion, index: number) {
   await store.addInterviewQuestion(selectedArchetypeId.value, question.question, question.purpose)
 
   // Mark as added
-  aiResponse.value.rawData.questions[index].added = true
+  aiResponse.value.rawData!.questions![index]!.added = true
 }
 
 // Add all questions at once
 async function addAllQuestions() {
   if (!selectedArchetypeId.value || !aiResponse.value?.rawData?.questions) return
 
-  for (let i = 0; i < aiResponse.value.rawData.questions.length; i++) {
-    const question = aiResponse.value.rawData.questions[i]
-    if (!question.added) {
+  const questions = aiResponse.value.rawData.questions
+  for (let i = 0; i < questions.length; i++) {
+    const question = questions[i]
+    if (question && !question.added) {
       await addAiQuestion(question, i)
     }
   }
@@ -782,7 +785,7 @@ async function addNewHypothesisFromSynthesis(hyp: AiNewHypothesis, index: number
   }
 
   // Mark as added
-  aiResponse.value.rawData.synthesis.newHypotheses[index].added = true
+  aiResponse.value.rawData!.synthesis!.newHypotheses![index]!.added = true
 }
 
 // Apply hypothesis status update from synthesis
@@ -804,13 +807,13 @@ async function applyHypothesisUpdate(update: AiHypothesisUpdate, index: number) 
     if (match) {
       const newStatus = update.newStatus as ValidationStatus
       await store.updateHypothesisStatus(selectedArchetypeId.value, field, match.id, newStatus, update.evidence)
-      aiResponse.value.rawData.synthesis.hypothesisUpdates[index].applied = true
+      aiResponse.value.rawData!.synthesis!.hypothesisUpdates![index]!.applied = true
       return
     }
   }
 
   // If no match found, mark as applied anyway (couldn't find hypothesis)
-  aiResponse.value.rawData.synthesis.hypothesisUpdates[index].applied = true
+  aiResponse.value.rawData!.synthesis!.hypothesisUpdates![index]!.applied = true
 }
 
 // Watch for BS flags

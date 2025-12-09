@@ -1,4 +1,3 @@
-import { computed } from 'vue'
 import { useFocusAreasStore } from '@/stores/focusAreas'
 import { useDiscoveryStore } from '@/stores/discovery'
 import { useCustomerArchetypesStore } from '@/stores/customerArchetypes'
@@ -89,7 +88,7 @@ export function useRelatedItems() {
 
     // Documents linked to this focus area
     documentsStore.documents
-      .filter(d => d.focusAreaId === focusAreaId)
+      .filter(d => d.focusAreaIds?.includes(focusAreaId))
       .forEach(d => items.push({
         id: d.id,
         type: 'document',

@@ -77,14 +77,14 @@ const typeConfig: Record<string, { icon: string; color: string; bgColor: string;
   },
 }
 
-const config = computed(() => typeConfig[props.type] || typeConfig['document'])
-const displayLabel = computed(() => props.label || config.value.label)
+const config = computed(() => typeConfig[props.type] ?? typeConfig['document']!)
+const displayLabel = computed(() => props.label || config.value?.label || '')
 const shouldShow = computed(() => props.showZero || props.count > 0)
 </script>
 
 <template>
   <div
-    v-if="shouldShow"
+    v-if="shouldShow && config"
     :class="[
       'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
       config.bgColor,
