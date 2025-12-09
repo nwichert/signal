@@ -39,29 +39,34 @@ const navSections: NavSection[] = [
       { name: 'Vision & Principles', path: '/vision', icon: 'star', roles: ['cpo', 'team', 'leadership'] },
       { name: 'Strategic Context', path: '/strategic-context', icon: 'compass', roles: ['cpo', 'team'] },
       { name: 'Focus Areas', path: '/focus-areas', icon: 'target', roles: ['cpo', 'team', 'leadership'] },
-      { name: 'Team Objectives', path: '/objectives', icon: 'flag', roles: ['cpo', 'team'] },
+    ]
+  },
+  {
+    label: 'Customers',
+    items: [
+      { name: 'Customer Archetypes', path: '/customer-archetypes', icon: 'users', roles: ['cpo', 'team'] },
+      { name: 'Journey Maps', path: '/journey-maps', icon: 'map', roles: ['cpo', 'team'] },
     ]
   },
   {
     label: 'Discovery',
     items: [
-      { name: 'Customer Archetypes', path: '/customer-archetypes', icon: 'users', roles: ['cpo', 'team'] },
       { name: 'Discovery Hub', path: '/discovery', icon: 'search', roles: ['cpo', 'team'] },
-      { name: 'Journey Maps', path: '/journey-maps', icon: 'map', roles: ['cpo', 'team'] },
-    ]
-  },
-  {
-    label: 'Ideation',
-    items: [
       { name: 'Idea Hopper', path: '/idea-hopper', icon: 'lightbulb', roles: ['cpo', 'team'] },
-      { name: 'Decisions Log', path: '/decisions', icon: 'clipboard', roles: ['cpo', 'team'] },
     ]
   },
   {
     label: 'Execution',
     items: [
+      { name: 'Team Objectives', path: '/objectives', icon: 'flag', roles: ['cpo', 'team'] },
+      { name: 'Decisions Log', path: '/decisions', icon: 'clipboard', roles: ['cpo', 'team'] },
       { name: 'Delivery Tracker', path: '/delivery', icon: 'truck', roles: ['cpo', 'team'] },
-      { name: 'Knowledge', path: '/documents', icon: 'book', roles: ['cpo', 'team'] },
+    ]
+  },
+  {
+    label: 'Knowledge',
+    items: [
+      { name: 'Documents', path: '/documents', icon: 'book', roles: ['cpo', 'team'] },
     ]
   },
 ]
