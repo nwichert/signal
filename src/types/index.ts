@@ -70,7 +70,68 @@ export interface Hypothesis {
   createdBy: string
 }
 
-// Design Partner Feedback
+// Design Partners - CRM-light for managing partner relationships
+export type DesignPartnerStatus = 'prospect' | 'active' | 'paused' | 'churned'
+export type EngagementType = 'call' | 'demo' | 'feedback-session' | 'usability-test' | 'interview' | 'email' | 'other'
+
+export interface DesignPartnerEngagement {
+  id: string
+  date: Timestamp
+  type: EngagementType
+  title: string
+  notes: string
+  keyTakeaways: string[]
+  createdAt: Timestamp
+}
+
+export interface DesignPartnerFeedback {
+  id: string
+  content: string
+  theme: string
+  hypothesisId?: string  // Links feedback to hypothesis for validation
+  engagementId?: string  // Which engagement session this came from
+  createdAt: Timestamp
+}
+
+export interface DesignPartnerInsight {
+  id: string
+  content: string
+  category: 'pain-point' | 'feature-request' | 'validation' | 'surprise' | 'quote'
+  priority: 'high' | 'medium' | 'low'
+  createdAt: Timestamp
+}
+
+export interface DesignPartner {
+  id: string
+  // Contact Info
+  name: string                    // Partner/company name
+  contactName: string             // Primary contact person
+  contactEmail?: string
+  contactRole?: string            // Their job title/role
+  company?: string                // Company name if different from partner name
+
+  // Relationship
+  status: DesignPartnerStatus
+  startDate?: Timestamp
+
+  // Context
+  notes?: string                  // General notes about the partner
+
+  // Activity Data
+  engagements: DesignPartnerEngagement[]
+  feedback: DesignPartnerFeedback[]
+  insights: DesignPartnerInsight[]
+
+  // Cross-feature links
+  archetypeId?: string            // Which customer archetype they represent
+
+  // Meta
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  createdBy: string
+}
+
+// Legacy Feedback type - kept for migration but will be deprecated
 export interface Feedback {
   id: string
   source: string

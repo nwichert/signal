@@ -34,7 +34,6 @@ const deliveryStore = useDeliveryStore()
 
 const activeFilter = ref<HypothesisStatus | 'all'>('all')
 const showAddHypothesis = ref(false)
-const showAddFeedback = ref(false)
 const editingHypothesis = ref<Hypothesis | null>(null)
 
 const filters = [
@@ -61,13 +60,6 @@ const defaultHypothesisForm = {
 }
 
 const hypothesisForm = ref({ ...defaultHypothesisForm })
-
-const feedbackForm = ref({
-  source: '',
-  content: '',
-  theme: '',
-  archetypeId: '',
-})
 
 // Expanded hypothesis for showing connections
 const expandedHypothesisId = ref<string | null>(null)
@@ -171,22 +163,6 @@ async function updateStatus(id: string, status: HypothesisStatus) {
 async function handleDeleteHypothesis(id: string) {
   if (!confirm('Delete this hypothesis?')) return
   await discoveryStore.deleteHypothesis(id)
-}
-
-async function handleSubmitFeedback() {
-  await discoveryStore.addFeedback({
-    source: feedbackForm.value.source,
-    content: feedbackForm.value.content,
-    theme: feedbackForm.value.theme,
-    archetypeId: feedbackForm.value.archetypeId || undefined,
-  })
-  feedbackForm.value = { source: '', content: '', theme: '', archetypeId: '' }
-  showAddFeedback.value = false
-}
-
-async function handleDeleteFeedback(id: string) {
-  if (!confirm('Delete this feedback?')) return
-  await discoveryStore.deleteFeedback(id)
 }
 
 function getStatusBadgeClass(status: HypothesisStatus) {
@@ -1031,109 +1007,42 @@ function getPriorityBadgeClass(priority: string) {
         </div>
       </section>
 
-      <!-- Design Partner Feedback -->
+      <!-- Design Partner Feedback - Now managed in Design Partners -->
       <section>
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-medium text-gray-700">Design Partner Feedback</h2>
-          <button
-            v-if="authStore.canEdit && !showAddFeedback"
-            class="btn-ghost text-sm"
-            @click="showAddFeedback = true"
+          <h2 class="text-sm font-medium text-gray-700">Partner Feedback</h2>
+          <RouterLink
+            to="/design-partners"
+            class="btn-ghost text-sm inline-flex items-center gap-1"
           >
-            + Add Feedback
-          </button>
+            Manage Partners
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+          </RouterLink>
         </div>
 
-        <!-- Add feedback form -->
-        <div v-if="showAddFeedback" class="card p-4 mb-4 space-y-3">
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label class="label">Source</label>
-              <input
-                v-model="feedbackForm.source"
-                class="input"
-                placeholder="e.g., Fire Dept A, EMT John"
-              />
+        <div class="card p-4 bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-200">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
             </div>
-            <div>
-              <label class="label">Theme</label>
-              <input
-                v-model="feedbackForm.theme"
-                class="input"
-                placeholder="e.g., Onboarding, Scheduling"
-              />
-            </div>
-            <div>
-              <label class="label">Customer Archetype</label>
-              <select v-model="feedbackForm.archetypeId" class="input">
-                <option value="">None</option>
-                <option
-                  v-for="arch in archetypesStore.activeArchetypes"
-                  :key="arch.id"
-                  :value="arch.id"
-                >
-                  {{ arch.name }}
-                </option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label class="label">Feedback</label>
-            <textarea
-              v-model="feedbackForm.content"
-              class="input min-h-[60px]"
-              placeholder="What did they say?"
-            />
-          </div>
-          <div class="flex gap-2 justify-end">
-            <button class="btn-ghost text-sm" @click="showAddFeedback = false">Cancel</button>
-            <button
-              class="btn-primary text-sm"
-              :disabled="!feedbackForm.content.trim()"
-              @click="handleSubmitFeedback"
-            >
-              Add Feedback
-            </button>
-          </div>
-        </div>
-
-        <div v-if="discoveryStore.feedback.length === 0" class="text-sm text-gray-400">
-          No feedback recorded yet.
-        </div>
-
-        <div v-else class="space-y-2">
-          <div
-            v-for="fb in discoveryStore.feedback"
-            :key="fb.id"
-            class="card p-3 group"
-          >
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1">
-                <div class="flex items-center gap-2 mb-1 flex-wrap">
-                  <span class="text-sm font-medium text-gray-900">{{ fb.source }}</span>
-                  <span v-if="fb.theme" class="badge-gray">{{ fb.theme }}</span>
-                  <RouterLink
-                    v-if="getArchetypeName(fb.archetypeId)"
-                    to="/customer-archetypes"
-                    class="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200"
-                  >
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                    {{ getArchetypeName(fb.archetypeId) }}
-                  </RouterLink>
-                </div>
-                <p class="text-sm text-gray-600">{{ fb.content }}</p>
-              </div>
-              <button
-                v-if="authStore.canEdit"
-                class="p-1 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100"
-                @click="handleDeleteFeedback(fb.id)"
+            <div class="flex-1">
+              <h3 class="font-medium text-gray-900 mb-1">Design Partner Feedback has moved</h3>
+              <p class="text-sm text-gray-600 mb-3">
+                Feedback is now captured and organized in the Design Partners page, where you can track partner relationships, log engagements, and link feedback to hypotheses for validation.
+              </p>
+              <RouterLink
+                to="/design-partners"
+                class="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                 </svg>
-              </button>
+                Go to Design Partners
+              </RouterLink>
             </div>
           </div>
         </div>

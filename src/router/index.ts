@@ -96,6 +96,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/CustomerArchetypesView.vue'),
         meta: { title: 'Customer Archetypes', roles: ['cpo', 'team'] },
       },
+      {
+        path: 'design-partners',
+        name: 'DesignPartners',
+        component: () => import('@/views/DesignPartnersView.vue'),
+        meta: { title: 'Design Partners', roles: ['cpo', 'team'] },
+      },
     ],
   },
   {
