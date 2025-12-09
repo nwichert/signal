@@ -11,6 +11,7 @@ import type {
   ValidationStatus,
 } from '@/types'
 import { Timestamp } from 'firebase/firestore'
+import AudioTranscriber from '@/components/AudioTranscriber.vue'
 
 const authStore = useAuthStore()
 const store = useCustomerArchetypesStore()
@@ -314,6 +315,13 @@ function handleFileUpload(event: Event) {
   if (fileInputRef.value) {
     fileInputRef.value.value = ''
   }
+}
+
+// Handle transcription result from audio recording
+function handleTranscriptionComplete(result: { text: string; documentId?: string }) {
+  // Populate the interview form with the transcribed text
+  interviewForm.value.rawNotes = result.text
+  showInterviewForm.value = true
 }
 
 // Analyze transcript with AI
@@ -1701,15 +1709,25 @@ watch(selectedArchetype, (archetype) => {
                     {{ selectedArchetype.interviewNotes.length }} of {{ selectedArchetype.interviewTarget }} interviews completed
                   </p>
                 </div>
-                <button
-                  class="btn-primary inline-flex items-center gap-2"
-                  @click="showInterviewForm = true"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add Interview
-                </button>
+                <div class="flex items-center gap-2">
+                  <!-- Take Notes with AI - Audio Transcription -->
+                  <AudioTranscriber
+                    mode="interview"
+                    :source-id="selectedArchetype.id"
+                    :source-name="selectedArchetype.name"
+                    :archetype-id="selectedArchetype.id"
+                    @transcribed="handleTranscriptionComplete"
+                  />
+                  <button
+                    class="btn-primary inline-flex items-center gap-2"
+                    @click="showInterviewForm = true"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add Interview
+                  </button>
+                </div>
               </div>
 
               <!-- Interview Form -->

@@ -10,6 +10,7 @@ import {
   serverTimestamp,
   query,
   orderBy,
+  Timestamp,
 } from 'firebase/firestore'
 import { db } from '@/firebase/config'
 import type {
@@ -408,7 +409,7 @@ export const useCustomerArchetypesStore = defineStore('customerArchetypes', () =
     const newNote: InterviewNote = {
       ...note,
       id: generateId(),
-      createdAt: serverTimestamp() as any,
+      createdAt: Timestamp.now(),  // Use Timestamp.now() instead of serverTimestamp() for arrays
     }
 
     const updated = [...archetype.interviewNotes, newNote]

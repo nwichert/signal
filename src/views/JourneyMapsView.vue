@@ -6,6 +6,7 @@ import { useJourneyMapsStore } from '@/stores/journeyMaps'
 import { httpsCallable } from 'firebase/functions'
 import { functions } from '@/firebase/config'
 import type { JourneyMap, JourneyStep, ExperienceLevel, Idea } from '@/types'
+import AudioTranscriber from '@/components/AudioTranscriber.vue'
 
 const authStore = useAuthStore()
 const ideasStore = useIdeasStore()
@@ -124,7 +125,7 @@ function removeStep(index: number) {
   })
 }
 
-async function generateWithAI() {
+async function generateWithAI(transcriptText?: string) {
   if (!selectedIdea.value) return
 
   generating.value = true
@@ -135,7 +136,7 @@ async function generateWithAI() {
     const result = await generateFn({
       job: selectedIdea.value.job,
       ideaTitle: selectedIdea.value.title,
-      ideaDescription: selectedIdea.value.description,
+      ideaDescription: selectedIdea.value.description + (transcriptText ? `\n\nTranscript from customer call:\n${transcriptText}` : ''),
     })
 
     const data = result.data as {
@@ -156,6 +157,12 @@ async function generateWithAI() {
   } finally {
     generating.value = false
   }
+}
+
+// Handle transcription from audio recording
+async function handleTranscriptionComplete(result: { text: string; documentId?: string }) {
+  // Use the transcribed text to generate the journey map with additional context
+  await generateWithAI(result.text)
 }
 
 async function handleSubmit() {
@@ -372,21 +379,43 @@ function getExperienceColor(value: number, isNegative: boolean) {
               </h3>
               <p class="text-indigo-100 text-sm mt-1">Define the steps in your customer's journey</p>
             </div>
-            <button
-              v-if="authStore.canEdit && !editingJourneyMap"
-              class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors text-sm font-medium backdrop-blur-sm"
-              :disabled="generating"
-              @click="generateWithAI"
-            >
-              <svg v-if="generating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-              </svg>
-              {{ generating ? 'Generating...' : 'Generate with AI' }}
-            </button>
+            <div v-if="authStore.canEdit && !editingJourneyMap" class="flex items-center gap-2">
+              <!-- Listen & Enrich with AI - Audio Transcription -->
+              <AudioTranscriber
+                mode="journey-map"
+                :source-id="selectedIdeaId || undefined"
+                :source-name="selectedIdea?.title"
+                @transcribed="handleTranscriptionComplete"
+              >
+                <template #trigger="{ start, isRecording }">
+                  <button
+                    v-if="!isRecording"
+                    class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors text-sm font-medium backdrop-blur-sm"
+                    :disabled="generating"
+                    @click="start"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                    Listen & Enrich
+                  </button>
+                </template>
+              </AudioTranscriber>
+              <button
+                class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors text-sm font-medium backdrop-blur-sm"
+                :disabled="generating"
+                @click="generateWithAI()"
+              >
+                <svg v-if="generating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                </svg>
+                {{ generating ? 'Generating...' : 'Generate with AI' }}
+              </button>
+            </div>
           </div>
         </div>
 

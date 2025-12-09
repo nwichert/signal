@@ -18,7 +18,7 @@ import {
   deleteObject,
 } from 'firebase/storage'
 import { db, storage } from '@/firebase/config'
-import type { Document, DocumentCategory, DocumentType, KnowledgeCategory, InspirationCategory } from '@/types'
+import type { Document, DocumentCategory, DocumentType, InspirationCategory, TranscriptSourceType } from '@/types'
 import { useAuthStore } from './auth'
 
 export const useDocumentsStore = defineStore('documents', () => {
@@ -37,6 +37,11 @@ export const useDocumentsStore = defineStore('documents', () => {
 
   const inspirationDocuments = computed(() =>
     documents.value.filter((d) => d.documentType === 'inspiration')
+  )
+
+  // Get transcript documents
+  const transcriptDocuments = computed(() =>
+    documents.value.filter((d) => d.category === 'transcript')
   )
 
   // Get high-priority knowledge docs (for AI context)
@@ -145,6 +150,11 @@ export const useDocumentsStore = defineStore('documents', () => {
       priority: 1 | 2 | 3
       externalUrl?: string
       focusAreaIds?: string[]
+      archetypeIds?: string[]
+      // Transcript-specific fields
+      sourceType?: TranscriptSourceType
+      sourceId?: string
+      transcriptDuration?: number
     }
   ) {
     const authStore = useAuthStore()
@@ -197,6 +207,19 @@ export const useDocumentsStore = defineStore('documents', () => {
       }
       if (data.focusAreaIds && data.focusAreaIds.length > 0) {
         docData.focusAreaIds = data.focusAreaIds
+      }
+      if (data.archetypeIds && data.archetypeIds.length > 0) {
+        docData.archetypeIds = data.archetypeIds
+      }
+      // Transcript-specific fields
+      if (data.sourceType) {
+        docData.sourceType = data.sourceType
+      }
+      if (data.sourceId) {
+        docData.sourceId = data.sourceId
+      }
+      if (data.transcriptDuration) {
+        docData.transcriptDuration = data.transcriptDuration
       }
 
       await addDoc(collection(db, 'documents'), docData)
@@ -347,6 +370,8 @@ export const useDocumentsStore = defineStore('documents', () => {
         return 'badge-green'
       case 'reference':
         return 'badge-yellow'
+      case 'transcript':
+        return 'badge-orange'
       // Inspiration categories
       case 'ux-pattern':
         return 'badge-pink'
@@ -393,6 +418,7 @@ export const useDocumentsStore = defineStore('documents', () => {
     documents,
     knowledgeDocuments,
     inspirationDocuments,
+    transcriptDocuments,
     priorityKnowledgeDocs,
     allTags,
     loading,

@@ -20,6 +20,13 @@ const filterCategory = ref<string>('all')
 const filterTag = ref<string>('all')
 const dragOver = ref(false)
 
+// Preview state
+const showPreview = ref(false)
+const previewDocument = ref<Document | null>(null)
+const previewContent = ref<string | null>(null)
+const previewLoading = ref(false)
+const previewError = ref<string | null>(null)
+
 const fileInput = ref<HTMLInputElement | null>(null)
 const selectedFile = ref<File | null>(null)
 
@@ -317,6 +324,46 @@ function formatDate(timestamp: { toDate: () => Date } | null | undefined) {
 
 function isImageFile(fileType: string): boolean {
   return fileType.startsWith('image/')
+}
+
+function isTextFile(fileType: string): boolean {
+  return fileType === 'text/plain' ||
+         fileType === 'text/markdown' ||
+         fileType === 'application/json' ||
+         fileType.startsWith('text/')
+}
+
+function isPdfFile(fileType: string): boolean {
+  return fileType === 'application/pdf'
+}
+
+async function openPreview(document: Document) {
+  previewDocument.value = document
+  previewContent.value = null
+  previewError.value = null
+  showPreview.value = true
+
+  // For text files, fetch the content
+  if (isTextFile(document.fileType) && document.storageUrl) {
+    previewLoading.value = true
+    try {
+      const response = await fetch(document.storageUrl)
+      if (!response.ok) throw new Error('Failed to fetch document content')
+      previewContent.value = await response.text()
+    } catch (error) {
+      console.error('Error fetching document content:', error)
+      previewError.value = error instanceof Error ? error.message : 'Failed to load document'
+    } finally {
+      previewLoading.value = false
+    }
+  }
+}
+
+function closePreview() {
+  showPreview.value = false
+  previewDocument.value = null
+  previewContent.value = null
+  previewError.value = null
 }
 </script>
 
@@ -699,10 +746,11 @@ function isImageFile(fileType: string): boolean {
         <div
           v-for="document in filteredDocuments"
           :key="document.id"
-          class="card p-4 group hover:border-gray-300 transition-colors"
+          class="card p-4 group hover:border-gray-300 transition-colors cursor-pointer"
+          @click="openPreview(document)"
         >
           <!-- Edit Mode -->
-          <div v-if="editingDocumentId === document.id" class="space-y-3">
+          <div v-if="editingDocumentId === document.id" class="space-y-3" @click.stop>
             <input v-model="editForm.name" class="input" placeholder="Document name" />
             <textarea v-model="editForm.description" class="input min-h-[60px]" placeholder="Description" />
             <select v-model="editForm.category" class="input">
@@ -790,7 +838,7 @@ function isImageFile(fileType: string): boolean {
             </div>
 
             <!-- Actions -->
-            <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+            <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100" @click.stop>
               <a
                 v-if="document.storageUrl"
                 :href="document.storageUrl"
@@ -847,6 +895,147 @@ function isImageFile(fileType: string): boolean {
     <div v-if="documentsStore.error" class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-600">
       {{ documentsStore.error }}
     </div>
+
+    <!-- Preview Modal -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div
+          v-if="showPreview && previewDocument"
+          class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          @click.self="closePreview"
+        >
+          <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <!-- Header -->
+            <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="p-2 bg-gray-100 rounded-lg flex-shrink-0">
+                  <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="documentsStore.getFileIcon(previewDocument.fileType)" />
+                  </svg>
+                </div>
+                <div class="min-w-0">
+                  <h3 class="text-lg font-semibold text-gray-900 truncate">{{ previewDocument.name }}</h3>
+                  <p class="text-sm text-gray-500 flex items-center gap-2">
+                    <span :class="documentsStore.getCategoryBadgeClass(previewDocument.category)" class="text-xs">
+                      {{ previewDocument.category }}
+                    </span>
+                    <span v-if="previewDocument.fileSize">• {{ documentsStore.formatFileSize(previewDocument.fileSize) }}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                class="p-2 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
+                @click="closePreview"
+              >
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- Content -->
+            <div class="flex-1 overflow-auto p-6">
+              <!-- Loading state -->
+              <div v-if="previewLoading" class="flex flex-col items-center justify-center py-12">
+                <div class="w-10 h-10 border-4 border-gray-200 border-t-accent-500 rounded-full animate-spin" />
+                <p class="mt-4 text-gray-500">Loading document...</p>
+              </div>
+
+              <!-- Error state -->
+              <div v-else-if="previewError" class="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p class="text-sm text-red-600">{{ previewError }}</p>
+              </div>
+
+              <!-- Text content preview -->
+              <div v-else-if="isTextFile(previewDocument.fileType) && previewContent">
+                <pre class="whitespace-pre-wrap font-mono text-sm text-gray-800 bg-gray-50 p-4 rounded-lg border border-gray-200 max-h-[60vh] overflow-auto">{{ previewContent }}</pre>
+              </div>
+
+              <!-- Image preview -->
+              <div v-else-if="isImageFile(previewDocument.fileType) && previewDocument.storageUrl" class="flex items-center justify-center">
+                <img
+                  :src="previewDocument.storageUrl"
+                  :alt="previewDocument.name"
+                  class="max-w-full max-h-[60vh] object-contain rounded-lg shadow-lg"
+                />
+              </div>
+
+              <!-- PDF preview -->
+              <div v-else-if="isPdfFile(previewDocument.fileType) && previewDocument.storageUrl" class="h-[60vh]">
+                <iframe
+                  :src="previewDocument.storageUrl"
+                  class="w-full h-full rounded-lg border border-gray-200"
+                  title="PDF Preview"
+                />
+              </div>
+
+              <!-- Other file types - show info -->
+              <div v-else class="text-center py-12">
+                <div class="p-4 bg-gray-100 rounded-full inline-block mb-4">
+                  <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="documentsStore.getFileIcon(previewDocument.fileType)" />
+                  </svg>
+                </div>
+                <p class="text-gray-600 mb-2">Preview not available for this file type</p>
+                <p class="text-sm text-gray-400">{{ previewDocument.fileType }}</p>
+              </div>
+
+              <!-- Description -->
+              <div v-if="previewDocument.description" class="mt-6 pt-6 border-t border-gray-200">
+                <h4 class="text-sm font-medium text-gray-700 mb-2">Description</h4>
+                <p class="text-sm text-gray-600">{{ previewDocument.description }}</p>
+              </div>
+
+              <!-- Tags -->
+              <div v-if="previewDocument.tags.length > 0" class="mt-4">
+                <h4 class="text-sm font-medium text-gray-700 mb-2">Tags</h4>
+                <div class="flex flex-wrap gap-2">
+                  <span
+                    v-for="tag in previewDocument.tags"
+                    :key="tag"
+                    class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded"
+                  >
+                    {{ tag }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="px-6 py-4 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
+              <p class="text-xs text-gray-400">
+                Uploaded {{ formatDate(previewDocument.createdAt) }}
+                <span v-if="previewDocument.uploadedByName">by {{ previewDocument.uploadedByName }}</span>
+              </p>
+              <div class="flex items-center gap-2">
+                <a
+                  v-if="previewDocument.externalUrl"
+                  :href="previewDocument.externalUrl"
+                  target="_blank"
+                  class="btn-ghost text-sm inline-flex items-center gap-1"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  Open External Link
+                </a>
+                <a
+                  v-if="previewDocument.storageUrl"
+                  :href="previewDocument.storageUrl"
+                  target="_blank"
+                  class="btn-primary text-sm inline-flex items-center gap-1"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  {{ isImageFile(previewDocument.fileType) ? 'View Full Size' : 'Download' }}
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -877,5 +1066,16 @@ function isImageFile(fileType: string): boolean {
 }
 .badge-teal {
   @apply px-2 py-0.5 text-xs font-medium rounded-full bg-teal-100 text-teal-700;
+}
+
+/* Fade transition for preview modal */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

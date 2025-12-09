@@ -3,12 +3,14 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const Anthropic = require("@anthropic-ai/sdk").default;
+const OpenAI = require("openai").default;
 
 admin.initializeApp();
 
 setGlobalOptions({ maxInstances: 10 });
 
 const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
+const openaiApiKey = defineSecret("OPENAI_API_KEY");
 
 /**
  * Helper function to parse JSON from AI response, handling markdown code fences
@@ -1891,6 +1893,720 @@ Return ONLY a valid JSON object with your analysis.`;
       };
     } catch (error) {
       console.error("Claude API error:", error);
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError(
+        "internal",
+        "Failed to analyze transcript: " + error.message
+      );
+    }
+  }
+);
+
+/**
+ * Transcribes audio using OpenAI Whisper API
+ * Accepts base64-encoded audio data and returns transcribed text
+ */
+exports.transcribeAudio = onCall(
+  {
+    secrets: [openaiApiKey],
+    timeoutSeconds: 300,
+    memory: "1GiB",
+  },
+  async (request) => {
+    // Verify authentication
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    // Verify user has team or cpo role
+    const userDoc = await admin
+      .firestore()
+      .collection("users")
+      .doc(request.auth.uid)
+      .get();
+
+    if (!userDoc.exists) {
+      throw new HttpsError("permission-denied", "User profile not found");
+    }
+
+    const userRole = userDoc.data().role;
+    if (!["cpo", "team"].includes(userRole)) {
+      throw new HttpsError("permission-denied", "Insufficient permissions");
+    }
+
+    const { audioBase64, mimeType, fileName } = request.data;
+
+    if (!audioBase64) {
+      throw new HttpsError("invalid-argument", "Audio data is required");
+    }
+
+    // Validate mime type
+    const supportedTypes = [
+      "audio/webm",
+      "audio/mp3",
+      "audio/mpeg",
+      "audio/mp4",
+      "audio/wav",
+      "audio/m4a",
+      "audio/ogg",
+    ];
+    const actualMimeType = mimeType || "audio/webm";
+    if (!supportedTypes.some((t) => actualMimeType.includes(t.split("/")[1]))) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Unsupported audio format: ${actualMimeType}. Supported: ${supportedTypes.join(", ")}`
+      );
+    }
+
+    try {
+      const openai = new OpenAI({
+        apiKey: openaiApiKey.value(),
+      });
+
+      // Convert base64 to buffer
+      const audioBuffer = Buffer.from(audioBase64, "base64");
+
+      // Determine file extension from mime type
+      const extMap = {
+        "audio/webm": "webm",
+        "audio/mp3": "mp3",
+        "audio/mpeg": "mp3",
+        "audio/mp4": "mp4",
+        "audio/wav": "wav",
+        "audio/m4a": "m4a",
+        "audio/ogg": "ogg",
+      };
+      const ext = extMap[actualMimeType] || "webm";
+      const audioFileName = fileName || `recording.${ext}`;
+
+      // Create a File-like object for the OpenAI API
+      const file = new File([audioBuffer], audioFileName, {
+        type: actualMimeType,
+      });
+
+      // Call Whisper API
+      const transcription = await openai.audio.transcriptions.create({
+        file: file,
+        model: "whisper-1",
+        response_format: "verbose_json",
+        timestamp_granularities: ["segment"],
+      });
+
+      return {
+        text: transcription.text,
+        segments: transcription.segments || [],
+        language: transcription.language,
+        duration: transcription.duration,
+      };
+    } catch (error) {
+      console.error("Whisper API error:", error);
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError(
+        "internal",
+        "Failed to transcribe audio: " + error.message
+      );
+    }
+  }
+);
+
+/**
+ * Generates hypothesis suggestions from cross-feature data
+ * Analyzes archetypes, ideas, journey maps, focus areas, and feedback
+ * to suggest hypotheses for the Discovery Hub
+ */
+exports.generateHypothesisSuggestions = onCall(
+  {
+    secrets: [anthropicApiKey],
+    timeoutSeconds: 180,  // Increased for web search
+    memory: "1GiB",
+  },
+  async (request) => {
+    // Verify authentication
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    // Verify user has team or cpo role
+    const userDoc = await admin
+      .firestore()
+      .collection("users")
+      .doc(request.auth.uid)
+      .get();
+
+    if (!userDoc.exists) {
+      throw new HttpsError("permission-denied", "User profile not found");
+    }
+
+    const userRole = userDoc.data().role;
+    if (!["cpo", "team"].includes(userRole)) {
+      throw new HttpsError("permission-denied", "Insufficient permissions");
+    }
+
+    // Option to enable/disable web search (can be passed from frontend)
+    const enableWebSearch = request.data?.enableWebSearch !== false;
+
+    try {
+      const db = admin.firestore();
+
+      // Fetch all relevant data in parallel
+      const [
+        archetypesSnapshot,
+        ideasSnapshot,
+        journeyMapsSnapshot,
+        focusAreasSnapshot,
+        feedbackSnapshot,
+        hypothesesSnapshot,
+        visionDoc,
+        knowledgeDocsSnapshot,
+        strategicContextDoc,
+      ] = await Promise.all([
+        db.collection("customerArchetypes").where("status", "in", ["draft", "active"]).get(),
+        db.collection("ideas").where("status", "in", ["new", "exploring"]).get(),
+        db.collection("journeyMaps").get(),
+        db.collection("focusAreas").where("status", "==", "active").get(),
+        db.collection("feedback").orderBy("createdAt", "desc").limit(50).get(),
+        db.collection("hypotheses").where("status", "==", "active").get(),
+        db.collection("vision").doc("main").get(),
+        // Fetch high-priority knowledge documents with summaries
+        db.collection("documents")
+          .where("documentType", "==", "knowledge")
+          .where("priority", "in", [1, 2])
+          .orderBy("priority")
+          .limit(20)
+          .get(),
+        // Fetch strategic context
+        db.collection("strategicContext").doc("main").get(),
+      ]);
+
+      // Build context for AI
+      let contextParts = [];
+
+      // Vision context
+      if (visionDoc.exists) {
+        const vision = visionDoc.data();
+        if (vision.vision || vision.mission) {
+          contextParts.push(`## Company Vision & Mission
+Vision: ${vision.vision || "Not set"}
+Mission: ${vision.mission || "Not set"}`);
+        }
+      }
+
+      // Customer Archetypes with rich detail
+      if (!archetypesSnapshot.empty) {
+        const archetypes = archetypesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        let archetypeContext = "## Customer Archetypes\n";
+        archetypes.forEach(a => {
+          archetypeContext += `\n### ${a.name} (${a.stakeholderRole || 'user'})\n`;
+          archetypeContext += `Job Title: ${a.jobTitle || 'Not specified'}\n`;
+          archetypeContext += `Problem: ${a.problemStatement || 'Not specified'}\n`;
+
+          if (a.specificPainPoints && a.specificPainPoints.length > 0) {
+            archetypeContext += `Pain Points:\n`;
+            a.specificPainPoints.forEach(p => {
+              archetypeContext += `  - ${p.content} [${p.status}]\n`;
+            });
+          }
+
+          if (a.primaryGoals && a.primaryGoals.length > 0) {
+            archetypeContext += `Goals:\n`;
+            a.primaryGoals.forEach(g => {
+              archetypeContext += `  - ${g.content} [${g.status}]\n`;
+            });
+          }
+
+          if (a.buyingCriteria && a.buyingCriteria.length > 0) {
+            archetypeContext += `Buying Criteria:\n`;
+            a.buyingCriteria.forEach(c => {
+              archetypeContext += `  - ${c.content} [${c.status}]\n`;
+            });
+          }
+        });
+        contextParts.push(archetypeContext);
+      }
+
+      // Ideas from Idea Hopper
+      if (!ideasSnapshot.empty) {
+        const ideas = ideasSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        let ideasContext = "## Ideas (Jobs to be Done)\n";
+        ideas.forEach(idea => {
+          ideasContext += `\n### ${idea.title} [${idea.status}]\n`;
+          ideasContext += `Description: ${idea.description || 'Not specified'}\n`;
+          if (idea.job) {
+            ideasContext += `JTBD: When ${idea.job.customer || 'a customer'} wants to ${idea.job.progress || 'accomplish something'} in ${idea.job.circumstance || 'a situation'}\n`;
+            ideasContext += `Job Type: ${idea.job.type || 'functional'}\n`;
+          }
+        });
+        contextParts.push(ideasContext);
+      }
+
+      // Journey Maps with pain points
+      if (!journeyMapsSnapshot.empty) {
+        const journeyMaps = journeyMapsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        let journeyContext = "## Journey Maps\n";
+        journeyMaps.forEach(jm => {
+          journeyContext += `\n### ${jm.title}\n`;
+          if (jm.steps && jm.steps.length > 0) {
+            const painfulSteps = jm.steps.filter(s => s.negativeExperience >= 4 || s.painPointNote);
+            if (painfulSteps.length > 0) {
+              journeyContext += `High-Pain Steps:\n`;
+              painfulSteps.forEach(s => {
+                journeyContext += `  - ${s.title}: ${s.painPointNote || s.description} (Pain: ${s.negativeExperience}/5)\n`;
+              });
+            }
+          }
+        });
+        contextParts.push(journeyContext);
+      }
+
+      // Focus Areas
+      if (!focusAreasSnapshot.empty) {
+        const focusAreas = focusAreasSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        let focusContext = "## Active Focus Areas\n";
+        focusAreas.forEach(fa => {
+          focusContext += `\n### ${fa.title} [${fa.confidenceLevel} confidence]\n`;
+          focusContext += `Problem: ${fa.problemStatement || 'Not specified'}\n`;
+          if (fa.successCriteria && fa.successCriteria.length > 0) {
+            focusContext += `Success Criteria: ${fa.successCriteria.join(', ')}\n`;
+          }
+        });
+        contextParts.push(focusContext);
+      }
+
+      // Recent Feedback themes
+      if (!feedbackSnapshot.empty) {
+        const feedback = feedbackSnapshot.docs.map(doc => doc.data());
+        const themes = [...new Set(feedback.map(f => f.theme).filter(Boolean))];
+        if (themes.length > 0) {
+          let feedbackContext = "## Recent Feedback Themes\n";
+          feedbackContext += themes.slice(0, 10).join(', ');
+          contextParts.push(feedbackContext);
+        }
+      }
+
+      // Knowledge Documents (high priority with summaries)
+      if (!knowledgeDocsSnapshot.empty) {
+        const docs = knowledgeDocsSnapshot.docs.map(doc => doc.data());
+        // Filter to docs that have summaries or descriptions
+        const usefulDocs = docs.filter(d => d.summary || d.description);
+        if (usefulDocs.length > 0) {
+          let knowledgeContext = "## Knowledge Base (Key Documents)\n";
+          usefulDocs.forEach(d => {
+            const priorityLabel = d.priority === 1 ? 'HIGH' : 'MEDIUM';
+            knowledgeContext += `\n### ${d.name} [${d.category}] (${priorityLabel} priority)\n`;
+            if (d.summary) {
+              knowledgeContext += `Summary: ${d.summary}\n`;
+            } else if (d.description) {
+              knowledgeContext += `Description: ${d.description}\n`;
+            }
+            if (d.tags && d.tags.length > 0) {
+              knowledgeContext += `Tags: ${d.tags.join(', ')}\n`;
+            }
+          });
+          contextParts.push(knowledgeContext);
+        }
+      }
+
+      // Strategic Context (market dynamics, competitive landscape, etc.)
+      if (strategicContextDoc.exists) {
+        const ctx = strategicContextDoc.data();
+        let strategicContext = "## Strategic Context\n";
+
+        if (ctx.marketDynamics) {
+          strategicContext += `\n### Market Dynamics\n${ctx.marketDynamics}\n`;
+        }
+        if (ctx.competitiveLandscape) {
+          strategicContext += `\n### Competitive Landscape\n${ctx.competitiveLandscape}\n`;
+        }
+        if (ctx.customerPainEvolution) {
+          strategicContext += `\n### Customer Pain Evolution\n${ctx.customerPainEvolution}\n`;
+        }
+        if (ctx.keyInsights) {
+          strategicContext += `\n### Key Strategic Insights\n${ctx.keyInsights}\n`;
+        }
+        if (ctx.companyContext) {
+          strategicContext += `\n### Company Context\n${ctx.companyContext}\n`;
+        }
+
+        // Only add if there's actual content
+        if (strategicContext !== "## Strategic Context\n") {
+          contextParts.push(strategicContext);
+        }
+      }
+
+      // Existing hypotheses to avoid duplicates
+      const existingHypotheses = hypothesesSnapshot.docs.map(doc => doc.data().belief);
+      let existingContext = "";
+      if (existingHypotheses.length > 0) {
+        existingContext = `\n\n## Existing Hypotheses (DO NOT duplicate these)\n${existingHypotheses.slice(0, 20).map(h => `- ${h}`).join('\n')}`;
+      }
+
+      // Build full context
+      const fullContext = contextParts.join('\n\n') + existingContext;
+
+      // Prepare metadata for linking suggestions
+      const archetypeIds = archetypesSnapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
+      const focusAreaIds = focusAreasSnapshot.docs.map(doc => ({ id: doc.id, title: doc.data().title }));
+
+      const systemPrompt = `You are an expert product discovery strategist trained in the 3-Risk Framework (Desirable, Feasible, Viable).
+
+## Your Role
+Analyze cross-feature product data and generate hypothesis suggestions that the team should validate. These hypotheses help de-risk product decisions.
+
+## Data Sources You Have Access To
+- **Customer Archetypes**: Who the customers are, their pain points, goals, and buying criteria
+- **Ideas (JTBD)**: Jobs to be done that customers want to accomplish
+- **Journey Maps**: Step-by-step customer experiences with pain points
+- **Focus Areas**: Current strategic priorities and problem statements
+- **Feedback**: Themes from design partner conversations
+- **Knowledge Base**: Key documents including research, strategy docs, and reference materials
+- **Strategic Context**: Market dynamics, competitive landscape, and company context
+
+## 3-Risk Framework
+Each hypothesis should address one or more risks:
+- **Desirable**: Do customers want this? Will they use it? Does it solve a real problem?
+- **Feasible**: Can we build it? Do we have the technical capability? What's the complexity?
+- **Viable**: Does it work for the business? Can we afford it? Will it generate value?
+
+## Hypothesis Format
+Each hypothesis should follow this structure:
+- **Belief**: "We believe that [specific testable statement]..."
+- **Test**: "We will test this by [concrete action]..."
+- **Risk**: Which risk(s) this addresses (desirable, feasible, viable)
+
+## Guidelines
+1. Generate 3-6 high-value hypotheses based on the data provided
+2. Prioritize hypotheses that:
+   - Connect multiple data sources (e.g., archetype pain + knowledge doc insight + journey pain point)
+   - Leverage insights from knowledge documents and strategic context
+   - Address unvalidated assumptions
+   - Have high impact if wrong
+3. Each hypothesis should be:
+   - Specific and testable (not vague)
+   - Actionable (clear how to test)
+   - Connected to real data from the context
+4. Include rationale explaining WHY this hypothesis matters
+5. Suggest which archetype and/or focus area to link to
+6. When knowledge documents or strategic context inform a hypothesis, mention them in the source field
+
+## Response Format
+Return a JSON object:
+{
+  "suggestions": [
+    {
+      "belief": "We believe that...",
+      "test": "We will test this by...",
+      "risks": ["desirable", "feasible", "viable"],
+      "rationale": "Why this matters and what data supports it",
+      "source": "Brief description of which data led to this suggestion",
+      "suggestedArchetypeId": "ID if applicable, null otherwise",
+      "suggestedFocusAreaId": "ID if applicable, null otherwise",
+      "priority": "high" | "medium" | "low",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "insights": ["Any meta-observations about gaps or patterns in the data"]
+}`;
+
+      const userPrompt = `Based on the following product data, generate hypothesis suggestions for Discovery Hub:
+
+${fullContext}
+
+## Available IDs for Linking
+Archetypes: ${JSON.stringify(archetypeIds)}
+Focus Areas: ${JSON.stringify(focusAreaIds)}
+
+Generate 3-6 hypotheses that would help the team validate their assumptions. Focus on high-impact, testable beliefs.
+
+Return ONLY valid JSON.`;
+
+      const client = new Anthropic({
+        apiKey: anthropicApiKey.value(),
+      });
+
+      // Build search context from company data for web search queries
+      let searchContext = "";
+      if (visionDoc.exists) {
+        const vision = visionDoc.data();
+        if (vision.coreBusinessModel) {
+          searchContext = vision.coreBusinessModel;
+        }
+      }
+
+      // If web search is enabled and we have context, use agentic loop with web search
+      let webSearchResults = "";
+      if (enableWebSearch && searchContext) {
+        try {
+          // First, ask Claude to generate search queries based on the product context
+          const searchQueryPrompt = `Based on this product context, generate 2-3 focused web search queries to find relevant market trends, competitor insights, or customer pain points that would help generate product hypotheses.
+
+Product context: ${searchContext}
+
+${contextParts.length > 0 ? `Key focus areas: ${focusAreasSnapshot.docs.slice(0, 3).map(d => d.data().title).join(", ")}` : ""}
+
+Return ONLY a JSON array of search query strings, e.g.: ["query 1", "query 2"]`;
+
+          const queryResponse = await client.messages.create({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 256,
+            messages: [{ role: "user", content: searchQueryPrompt }],
+          });
+
+          let searchQueries = [];
+          try {
+            const queryText = queryResponse.content[0].type === "text" ? queryResponse.content[0].text : "";
+            searchQueries = parseJsonFromAiResponse(queryText);
+          } catch (e) {
+            console.log("Could not parse search queries, skipping web search");
+          }
+
+          // Execute web searches using Claude's web search tool
+          if (searchQueries.length > 0) {
+            const searchMessages = [
+              {
+                role: "user",
+                content: `Search the web for the following queries and summarize the key findings relevant to product strategy and customer needs. Focus on market trends, competitor offerings, and customer pain points.
+
+Queries to search:
+${searchQueries.map((q, i) => `${i + 1}. ${q}`).join("\n")}
+
+After searching, provide a brief summary of the most relevant findings.`,
+              },
+            ];
+
+            // Agentic loop for web search
+            let searchResponse = await client.messages.create({
+              model: "claude-sonnet-4-20250514",
+              max_tokens: 2048,
+              tools: [{ type: "web_search_20250305" }],
+              messages: searchMessages,
+            });
+
+            // Process tool use in a loop
+            while (searchResponse.stop_reason === "tool_use") {
+              const toolUseBlocks = searchResponse.content.filter(
+                (block) => block.type === "tool_use"
+              );
+              const toolResults = [];
+
+              for (const toolUse of toolUseBlocks) {
+                // Web search tool is handled automatically by the API
+                // We just need to continue the conversation
+                toolResults.push({
+                  type: "tool_result",
+                  tool_use_id: toolUse.id,
+                  content: "Search completed",
+                });
+              }
+
+              searchMessages.push({ role: "assistant", content: searchResponse.content });
+              searchMessages.push({ role: "user", content: toolResults });
+
+              searchResponse = await client.messages.create({
+                model: "claude-sonnet-4-20250514",
+                max_tokens: 2048,
+                tools: [{ type: "web_search_20250305" }],
+                messages: searchMessages,
+              });
+            }
+
+            // Extract text from final response
+            const searchTextBlocks = searchResponse.content.filter(
+              (block) => block.type === "text"
+            );
+            if (searchTextBlocks.length > 0) {
+              webSearchResults = searchTextBlocks.map((b) => b.text).join("\n");
+            }
+          }
+        } catch (searchError) {
+          console.log("Web search failed, continuing without:", searchError.message);
+        }
+      }
+
+      // Add web search results to the prompt if available
+      const enrichedUserPrompt = webSearchResults
+        ? `${userPrompt}\n\n## Recent Web Research\nThe following insights were gathered from web searches about the market, competitors, and customer trends:\n\n${webSearchResults}`
+        : userPrompt;
+
+      const message = await client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2048,
+        messages: [
+          {
+            role: "user",
+            content: enrichedUserPrompt,
+          },
+        ],
+        system: systemPrompt,
+      });
+
+      const content = message.content[0];
+      if (content.type !== "text") {
+        throw new HttpsError("internal", "Unexpected response format");
+      }
+
+      let result;
+      try {
+        result = parseJsonFromAiResponse(content.text);
+      } catch (parseError) {
+        console.error("Failed to parse AI response:", content.text);
+        throw new HttpsError("internal", "Failed to parse hypothesis suggestions");
+      }
+
+      return {
+        suggestions: result.suggestions || [],
+        insights: result.insights || [],
+        webSearchUsed: !!webSearchResults,
+        usage: {
+          inputTokens: message.usage.input_tokens,
+          outputTokens: message.usage.output_tokens,
+        },
+      };
+    } catch (error) {
+      console.error("Hypothesis generation error:", error);
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError(
+        "internal",
+        "Failed to generate hypothesis suggestions: " + error.message
+      );
+    }
+  }
+);
+
+/**
+ * Analyzes an interview transcript to detect journey maps
+ * Returns structured journey map data if detected, or null if not
+ */
+exports.analyzeTranscriptForJourneyMap = onCall(
+  {
+    secrets: [anthropicApiKey],
+    timeoutSeconds: 120,
+    memory: "512MiB",
+  },
+  async (request) => {
+    // Verify authentication
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    // Verify user has team or cpo role
+    const userDoc = await admin
+      .firestore()
+      .collection("users")
+      .doc(request.auth.uid)
+      .get();
+
+    if (!userDoc.exists) {
+      throw new HttpsError("permission-denied", "User profile not found");
+    }
+
+    const userRole = userDoc.data().role;
+    if (!["cpo", "team"].includes(userRole)) {
+      throw new HttpsError("permission-denied", "Insufficient permissions");
+    }
+
+    const { transcript, availableIdeas } = request.data;
+
+    if (!transcript) {
+      throw new HttpsError("invalid-argument", "Transcript is required");
+    }
+
+    try {
+      const anthropic = new Anthropic({
+        apiKey: anthropicApiKey.value(),
+      });
+
+      // Format available ideas for context
+      const ideasContext = availableIdeas && availableIdeas.length > 0
+        ? `\n\nAvailable Ideas to associate with (choose the most relevant one):\n${availableIdeas.map(idea =>
+            `- ID: "${idea.id}" | Title: "${idea.title}" | Job: When ${idea.job?.customer || 'a user'} wants to ${idea.job?.progress || idea.title}`
+          ).join('\n')}`
+        : '\n\nNo existing ideas available - suggest creating a new idea if a journey is detected.';
+
+      const systemPrompt = `You are an expert product researcher analyzing interview transcripts for Signal, a B2B SaaS product management tool.
+
+Your task is to analyze the transcript and determine if the interviewee described a customer journey - a series of steps they go through to accomplish a goal or solve a problem.
+
+A journey map should have:
+1. A clear goal or job-to-be-done the customer is trying to accomplish
+2. Multiple distinct steps or phases they go through
+3. Emotional experiences (frustrations, satisfactions) at different points
+4. A timeline or sequence of events
+
+Analyze the transcript carefully. If you detect a journey being described, extract it into a structured format.
+${ideasContext}
+
+IMPORTANT: Only return a journey map if there is CLEAR evidence of a multi-step process being described. Do not fabricate journeys from vague mentions.`;
+
+      const userPrompt = `Analyze this interview transcript and determine if the interviewee described a customer journey:
+
+<transcript>
+${transcript}
+</transcript>
+
+If a journey is detected, respond with JSON in this exact format:
+{
+  "detected": true,
+  "confidence": "high" | "medium" | "low",
+  "journeyTitle": "Brief title for the journey",
+  "journeySubtitle": "One sentence describing what this journey covers",
+  "suggestedIdeaId": "ID of the most relevant existing idea, or null if none fit",
+  "suggestedNewIdea": {
+    "title": "Title if a new idea should be created",
+    "description": "Description of the idea",
+    "job": {
+      "progress": "What the customer is trying to accomplish",
+      "customer": "Who the customer is",
+      "circumstance": "When/where they need this",
+      "type": "functional" | "social" | "emotional"
+    }
+  } | null,
+  "steps": [
+    {
+      "order": 1,
+      "title": "Step title",
+      "description": "What happens in this step",
+      "outcome": "What the customer achieves or experiences",
+      "timelineDay": 0,
+      "negativeExperience": 1-5,
+      "positiveExperience": 1-5,
+      "painPointNote": "Optional note about frustrations"
+    }
+  ],
+  "summary": "Brief explanation of why this journey was detected"
+}
+
+If NO journey is detected, respond with:
+{
+  "detected": false,
+  "reason": "Brief explanation of why no journey was found"
+}
+
+Respond ONLY with valid JSON, no other text.`;
+
+      const message = await anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 4096,
+        messages: [
+          {
+            role: "user",
+            content: userPrompt,
+          },
+        ],
+        system: systemPrompt,
+      });
+
+      const responseText = message.content[0].text;
+      const result = parseJsonFromAiResponse(responseText);
+
+      return result;
+    } catch (error) {
+      console.error("Journey map analysis error:", error);
       if (error instanceof HttpsError) {
         throw error;
       }

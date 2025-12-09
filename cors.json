@@ -1,0 +1,7 @@
+[
+  {
+    "origin": ["http://localhost:5173", "http://localhost:4173", "https://signal-b33b3.web.app", "https://signal-b33b3.firebaseapp.com"],
+    "method": ["GET", "HEAD"],
+    "maxAgeSeconds": 3600
+  }
+]

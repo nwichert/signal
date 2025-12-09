@@ -53,7 +53,7 @@ export interface FocusArea {
 
 // Discovery Hub - Hypotheses
 export type HypothesisStatus = 'active' | 'validated' | 'invalidated' | 'parked'
-export type RiskType = 'valuable' | 'usable' | 'feasible' | 'viable'
+export type RiskType = 'desirable' | 'feasible' | 'viable'
 
 export interface Hypothesis {
   id: string
@@ -217,6 +217,7 @@ export type KnowledgeCategory =
   | 'technical'     // Technical specs, architecture docs
   | 'process'       // Team processes, playbooks
   | 'reference'     // General reference material
+  | 'transcript'    // Audio transcriptions from interviews/calls
 
 export type InspirationCategory =
   | 'ux-pattern'    // UI/UX patterns and examples
@@ -227,6 +228,9 @@ export type InspirationCategory =
   | 'other'         // Miscellaneous inspiration
 
 export type DocumentCategory = KnowledgeCategory | InspirationCategory
+
+// Source type for transcripts - where the recording came from
+export type TranscriptSourceType = 'interview' | 'journey-map' | 'general'
 
 export interface Document {
   id: string
@@ -252,6 +256,10 @@ export interface Document {
   // Cross-feature links
   archetypeIds?: string[]              // Which archetypes this document relates to
   focusAreaIds?: string[]              // Which focus areas this document relates to
+  // Transcript-specific fields
+  sourceType?: TranscriptSourceType    // For transcripts: where the recording came from
+  sourceId?: string                    // For transcripts: ID of the source (archetypeId, journeyMapId, etc.)
+  transcriptDuration?: number          // For transcripts: duration in seconds
 }
 
 // Idea Hopper - Jobs to be Done
