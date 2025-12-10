@@ -10,9 +10,10 @@ import {
   serverTimestamp,
   query,
   orderBy,
+  Timestamp,
 } from 'firebase/firestore'
 import { db } from '@/firebase/config'
-import type { FocusArea, ConfidenceLevel, FocusAreaStatus } from '@/types'
+import type { FocusArea, ConfidenceLevel, FocusAreaStatus, ConfidenceTrend, ConfidenceSnapshot } from '@/types'
 import { useAuthStore } from './auth'
 
 export const useFocusAreasStore = defineStore('focusAreas', () => {
@@ -23,13 +24,37 @@ export const useFocusAreasStore = defineStore('focusAreas', () => {
 
   let unsubscribe: (() => void) | null = null
 
+  // Filter by active statuses (not archived)
   const activeFocusAreas = computed(() =>
-    focusAreas.value.filter((fa) => fa.status === 'active')
+    focusAreas.value.filter((fa) => fa.status !== 'archived' && fa.status !== 'achieved')
   )
 
   const archivedFocusAreas = computed(() =>
     focusAreas.value.filter((fa) => fa.status === 'archived')
   )
+
+  const achievedFocusAreas = computed(() =>
+    focusAreas.value.filter((fa) => fa.status === 'achieved')
+  )
+
+  // By status
+  const focusAreasByStatus = computed(() => {
+    const byStatus: Record<FocusAreaStatus, FocusArea[]> = {
+      active: [],
+      validating: [],
+      scaling: [],
+      achieved: [],
+      pivoted: [],
+      paused: [],
+      archived: [],
+    }
+    focusAreas.value.forEach((fa) => {
+      if (byStatus[fa.status]) {
+        byStatus[fa.status].push(fa)
+      }
+    })
+    return byStatus
+  })
 
   function subscribe() {
     if (unsubscribe) return
@@ -68,6 +93,9 @@ export const useFocusAreasStore = defineStore('focusAreas', () => {
     confidenceRationale: string
     successCriteria: string[]
     targetArchetypeIds?: string[]
+    strategicImportance?: string
+    expectedOutcome?: string
+    principleIds?: string[]
   }) {
     const authStore = useAuthStore()
     if (!authStore.canEdit) {
@@ -78,9 +106,26 @@ export const useFocusAreasStore = defineStore('focusAreas', () => {
     error.value = null
 
     try {
+      // Create initial confidence history entry
+      const initialConfidenceSnapshot: ConfidenceSnapshot = {
+        level: data.confidenceLevel,
+        rationale: data.confidenceRationale,
+        changedAt: Timestamp.now(),
+        changedBy: authStore.user?.id || '',
+      }
+
       await addDoc(collection(db, 'focusAreas'), {
         ...data,
         status: 'active' as FocusAreaStatus,
+        confidenceTrend: 'stable' as ConfidenceTrend,
+        confidenceHistory: [initialConfidenceSnapshot],
+        progressPercentage: 0,
+        statusHistory: [{
+          status: 'active',
+          changedAt: Timestamp.now(),
+          changedBy: authStore.user?.id || '',
+          reason: 'Initial creation',
+        }],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         createdBy: authStore.user?.id,
@@ -96,15 +141,7 @@ export const useFocusAreasStore = defineStore('focusAreas', () => {
 
   async function updateFocusArea(
     id: string,
-    data: Partial<{
-      title: string
-      problemStatement: string
-      confidenceLevel: ConfidenceLevel
-      confidenceRationale: string
-      successCriteria: string[]
-      status: FocusAreaStatus
-      targetArchetypeIds: string[]
-    }>
+    data: Partial<FocusArea>
   ) {
     const authStore = useAuthStore()
     if (!authStore.canEdit) {
@@ -129,12 +166,86 @@ export const useFocusAreasStore = defineStore('focusAreas', () => {
     }
   }
 
-  async function archiveFocusArea(id: string) {
-    await updateFocusArea(id, { status: 'archived' })
+  // Update confidence with history tracking
+  async function updateConfidence(
+    id: string,
+    level: ConfidenceLevel,
+    rationale: string
+  ) {
+    const authStore = useAuthStore()
+    const focusArea = focusAreas.value.find((fa) => fa.id === id)
+    if (!focusArea) throw new Error('Focus area not found')
+
+    const newSnapshot: ConfidenceSnapshot = {
+      level,
+      rationale,
+      changedAt: Timestamp.now(),
+      changedBy: authStore.user?.id || '',
+    }
+
+    const history = [...(focusArea.confidenceHistory || []), newSnapshot]
+
+    // Calculate trend
+    let trend: ConfidenceTrend = 'stable'
+    if (history.length >= 2) {
+      const levels = { low: 1, medium: 2, high: 3 }
+      const current = levels[level]
+      const previous = levels[focusArea.confidenceLevel]
+      if (current > previous) trend = 'improving'
+      else if (current < previous) trend = 'declining'
+    }
+
+    await updateFocusArea(id, {
+      confidenceLevel: level,
+      confidenceRationale: rationale,
+      confidenceTrend: trend,
+      confidenceHistory: history,
+    })
+  }
+
+  // Update status with history tracking
+  async function updateStatus(
+    id: string,
+    status: FocusAreaStatus,
+    reason?: string
+  ) {
+    const authStore = useAuthStore()
+    const focusArea = focusAreas.value.find((fa) => fa.id === id)
+    if (!focusArea) throw new Error('Focus area not found')
+
+    const statusEntry = {
+      status,
+      changedAt: Timestamp.now(),
+      changedBy: authStore.user?.id || '',
+      reason,
+    }
+
+    const history = [...(focusArea.statusHistory || []), statusEntry]
+
+    await updateFocusArea(id, {
+      status,
+      statusHistory: history,
+    })
+  }
+
+  // Update progress percentage
+  async function updateProgress(id: string, percentage: number) {
+    await updateFocusArea(id, {
+      progressPercentage: Math.min(100, Math.max(0, percentage)),
+    })
+  }
+
+  async function archiveFocusArea(id: string, reason?: string) {
+    await updateStatus(id, 'archived', reason || 'Archived')
   }
 
   async function reactivateFocusArea(id: string) {
-    await updateFocusArea(id, { status: 'active' })
+    await updateStatus(id, 'active', 'Reactivated')
+  }
+
+  // Get focus area by ID
+  function getFocusAreaById(id: string): FocusArea | undefined {
+    return focusAreas.value.find((fa) => fa.id === id)
   }
 
   async function deleteFocusArea(id: string) {
@@ -156,6 +267,8 @@ export const useFocusAreasStore = defineStore('focusAreas', () => {
     focusAreas,
     activeFocusAreas,
     archivedFocusAreas,
+    achievedFocusAreas,
+    focusAreasByStatus,
     loading,
     saving,
     error,
@@ -163,8 +276,12 @@ export const useFocusAreasStore = defineStore('focusAreas', () => {
     unsubscribe: unsubscribeFromFocusAreas,
     addFocusArea,
     updateFocusArea,
+    updateConfidence,
+    updateStatus,
+    updateProgress,
     archiveFocusArea,
     reactivateFocusArea,
     deleteFocusArea,
+    getFocusAreaById,
   }
 })

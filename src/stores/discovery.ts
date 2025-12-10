@@ -10,12 +10,25 @@ import {
   serverTimestamp,
   query,
   orderBy,
+  Timestamp,
 } from 'firebase/firestore'
 import { db } from '@/firebase/config'
-import type { Hypothesis, HypothesisStatus, RiskType, Feedback } from '@/types'
+import type {
+  Hypothesis,
+  HypothesisStatus,
+  RiskType,
+  Feedback,
+  HypothesisEvidence,
+  EvidenceType,
+  EvidenceStrength,
+} from '@/types'
 import { useAuthStore } from './auth'
 import { useDecisionsStore } from './decisions'
 import { useFocusAreasStore } from './focusAreas'
+
+function generateId(): string {
+  return Math.random().toString(36).substring(2, 15)
+}
 
 export const useDiscoveryStore = defineStore('discovery', () => {
   const hypotheses = ref<Hypothesis[]>([])
@@ -42,6 +55,35 @@ export const useDiscoveryStore = defineStore('discovery', () => {
   const parkedHypotheses = computed(() =>
     hypotheses.value.filter((h) => h.status === 'parked')
   )
+
+  // Hypotheses with strong evidence (for executive reporting)
+  const hypothesesWithStrongEvidence = computed(() =>
+    hypotheses.value.filter((h) => h.overallEvidenceStrength === 'strong')
+  )
+
+  // High priority hypotheses (for roadmap prioritization)
+  const highPriorityHypotheses = computed(() =>
+    hypotheses.value.filter((h) => h.priority === 'high' && h.status === 'active')
+  )
+
+  // Get hypotheses by focus area
+  const hypothesesByFocusArea = computed(() => {
+    const byFocusArea: Record<string, Hypothesis[]> = {}
+    hypotheses.value.forEach((h) => {
+      if (h.focusAreaId) {
+        if (!byFocusArea[h.focusAreaId]) {
+          byFocusArea[h.focusAreaId] = []
+        }
+        byFocusArea[h.focusAreaId]!.push(h)
+      }
+    })
+    return byFocusArea
+  })
+
+  // Get hypothesis by ID
+  function getHypothesisById(id: string): Hypothesis | undefined {
+    return hypotheses.value.find((h) => h.id === id)
+  }
 
   function filterByStatus(status: HypothesisStatus | 'all') {
     if (status === 'all') return hypotheses.value
@@ -139,6 +181,11 @@ export const useDiscoveryStore = defineStore('discovery', () => {
       risks: RiskType[]
       focusAreaId: string
       archetypeId: string
+      // Evidence tracking fields
+      evidence: HypothesisEvidence[]
+      overallEvidenceStrength: EvidenceStrength
+      expectedImpact: string
+      priority: 'high' | 'medium' | 'low'
     }>
   ) {
     const authStore = useAuthStore()
@@ -312,6 +359,150 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     }
   }
 
+  // Evidence management functions
+  async function addEvidence(
+    hypothesisId: string,
+    data: {
+      type: EvidenceType
+      description: string
+      sampleSize?: number
+      dataSource?: string
+      strength: EvidenceStrength
+      documentIds?: string[]
+      designPartnerId?: string
+    }
+  ): Promise<void> {
+    const authStore = useAuthStore()
+    if (!authStore.canEdit) {
+      throw new Error('Not authorized to add evidence')
+    }
+
+    const hypothesis = hypotheses.value.find((h) => h.id === hypothesisId)
+    if (!hypothesis) throw new Error('Hypothesis not found')
+
+    const newEvidence: HypothesisEvidence = {
+      id: generateId(),
+      type: data.type,
+      description: data.description,
+      sampleSize: data.sampleSize,
+      dataSource: data.dataSource,
+      strength: data.strength,
+      documentIds: data.documentIds || [],
+      designPartnerId: data.designPartnerId,
+      createdAt: Timestamp.now(),
+      createdBy: authStore.user?.id || '',
+    }
+
+    const updatedEvidence = [...(hypothesis.evidence || []), newEvidence]
+    const overallStrength = calculateOverallEvidenceStrength(updatedEvidence)
+
+    await updateHypothesis(hypothesisId, {
+      evidence: updatedEvidence,
+      overallEvidenceStrength: overallStrength,
+    })
+  }
+
+  async function updateEvidence(
+    hypothesisId: string,
+    evidenceId: string,
+    data: Partial<HypothesisEvidence>
+  ): Promise<void> {
+    const authStore = useAuthStore()
+    if (!authStore.canEdit) {
+      throw new Error('Not authorized to update evidence')
+    }
+
+    const hypothesis = hypotheses.value.find((h) => h.id === hypothesisId)
+    if (!hypothesis) throw new Error('Hypothesis not found')
+
+    const updatedEvidence = (hypothesis.evidence || []).map((e) =>
+      e.id === evidenceId ? { ...e, ...data } : e
+    )
+    const overallStrength = calculateOverallEvidenceStrength(updatedEvidence)
+
+    await updateHypothesis(hypothesisId, {
+      evidence: updatedEvidence,
+      overallEvidenceStrength: overallStrength,
+    })
+  }
+
+  async function removeEvidence(
+    hypothesisId: string,
+    evidenceId: string
+  ): Promise<void> {
+    const authStore = useAuthStore()
+    if (!authStore.canEdit) {
+      throw new Error('Not authorized to remove evidence')
+    }
+
+    const hypothesis = hypotheses.value.find((h) => h.id === hypothesisId)
+    if (!hypothesis) throw new Error('Hypothesis not found')
+
+    const updatedEvidence = (hypothesis.evidence || []).filter((e) => e.id !== evidenceId)
+    const overallStrength = calculateOverallEvidenceStrength(updatedEvidence)
+
+    await updateHypothesis(hypothesisId, {
+      evidence: updatedEvidence,
+      overallEvidenceStrength: overallStrength,
+    })
+  }
+
+  // Calculate overall evidence strength from multiple evidence items
+  function calculateOverallEvidenceStrength(
+    evidence: HypothesisEvidence[]
+  ): EvidenceStrength {
+    if (evidence.length === 0) return 'weak'
+
+    const strengthScores = { weak: 1, moderate: 2, strong: 3 }
+    const totalScore = evidence.reduce(
+      (sum, e) => sum + strengthScores[e.strength],
+      0
+    )
+    const avgScore = totalScore / evidence.length
+
+    // Factor in quantity - more evidence increases strength
+    const quantityBonus = Math.min(evidence.length * 0.1, 0.5)
+    const adjustedScore = avgScore + quantityBonus
+
+    if (adjustedScore >= 2.5) return 'strong'
+    if (adjustedScore >= 1.5) return 'moderate'
+    return 'weak'
+  }
+
+  // Update hypothesis priority
+  async function updatePriority(
+    id: string,
+    priority: 'high' | 'medium' | 'low'
+  ): Promise<void> {
+    await updateHypothesis(id, { priority })
+  }
+
+  // Update expected impact
+  async function updateExpectedImpact(
+    id: string,
+    expectedImpact: string
+  ): Promise<void> {
+    await updateHypothesis(id, { expectedImpact })
+  }
+
+  // Get hypotheses count by focus area
+  function getHypothesesCountByFocusArea(focusAreaId: string): {
+    total: number
+    active: number
+    validated: number
+    invalidated: number
+  } {
+    const focusAreaHypotheses = hypotheses.value.filter(
+      (h) => h.focusAreaId === focusAreaId
+    )
+    return {
+      total: focusAreaHypotheses.length,
+      active: focusAreaHypotheses.filter((h) => h.status === 'active').length,
+      validated: focusAreaHypotheses.filter((h) => h.status === 'validated').length,
+      invalidated: focusAreaHypotheses.filter((h) => h.status === 'invalidated').length,
+    }
+  }
+
   async function addFeedback(data: {
     source: string
     content: string
@@ -364,16 +555,29 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     validatedHypotheses,
     invalidatedHypotheses,
     parkedHypotheses,
+    hypothesesWithStrongEvidence,
+    highPriorityHypotheses,
+    hypothesesByFocusArea,
     loading,
     saving,
     error,
     filterByStatus,
+    getHypothesisById,
+    getHypothesesCountByFocusArea,
     subscribe,
     unsubscribe: unsubscribeFromDiscovery,
     addHypothesis,
     updateHypothesis,
     updateHypothesisStatus,
     deleteHypothesis,
+    // Evidence management
+    addEvidence,
+    updateEvidence,
+    removeEvidence,
+    calculateOverallEvidenceStrength,
+    updatePriority,
+    updateExpectedImpact,
+    // Feedback (legacy)
     addFeedback,
     deleteFeedback,
   }

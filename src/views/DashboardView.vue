@@ -12,7 +12,7 @@ import { useObjectivesStore } from '@/stores/objectives'
 import { useDecisionsStore } from '@/stores/decisions'
 import { useJourneyMapsStore } from '@/stores/journeyMaps'
 import { useRelatedItems } from '@/composables/useRelatedItems'
-import type { ConfidenceLevel } from '@/types'
+import type { ConfidenceLevel, FocusAreaStatus, ConfidenceTrend } from '@/types'
 
 const authStore = useAuthStore()
 const focusAreasStore = useFocusAreasStore()
@@ -154,6 +154,87 @@ function getConfidenceBadgeClass(level: ConfidenceLevel) {
       return 'badge-red'
   }
 }
+
+function getStatusBadgeClass(status: FocusAreaStatus) {
+  switch (status) {
+    case 'active':
+      return 'bg-blue-100 text-blue-700'
+    case 'validating':
+      return 'bg-yellow-100 text-yellow-700'
+    case 'scaling':
+      return 'bg-green-100 text-green-700'
+    case 'achieved':
+      return 'bg-emerald-100 text-emerald-700'
+    case 'pivoted':
+      return 'bg-purple-100 text-purple-700'
+    case 'paused':
+      return 'bg-gray-100 text-gray-600'
+    case 'archived':
+      return 'bg-gray-100 text-gray-500'
+    default:
+      return 'bg-gray-100 text-gray-600'
+  }
+}
+
+function getTrendIcon(trend: ConfidenceTrend | undefined) {
+  switch (trend) {
+    case 'improving':
+      return { icon: '↑', class: 'text-green-500' }
+    case 'declining':
+      return { icon: '↓', class: 'text-red-500' }
+    default:
+      return { icon: '→', class: 'text-gray-400' }
+  }
+}
+
+// Strategic bets data - Focus areas with their progress and validation metrics
+const strategicBets = computed(() => {
+  return focusAreasStore.activeFocusAreas.map(fa => {
+    // Get hypotheses for this focus area
+    const hypotheses = discoveryStore.hypotheses.filter(h => h.focusAreaId === fa.id)
+    const validated = hypotheses.filter(h => h.status === 'validated').length
+    const invalidated = hypotheses.filter(h => h.status === 'invalidated').length
+    const active = hypotheses.filter(h => h.status === 'active').length
+
+    // Get decisions linked to this focus area
+    const decisions = decisionsStore.decisions.filter(d => d.focusAreaId === fa.id)
+    const decidedCount = decisions.filter(d => d.status === 'decided').length
+
+    // Calculate validation rate
+    const resolved = validated + invalidated
+    const validationRate = resolved > 0 ? Math.round((validated / resolved) * 100) : null
+
+    return {
+      ...fa,
+      hypothesisCount: hypotheses.length,
+      validatedCount: validated,
+      invalidatedCount: invalidated,
+      activeCount: active,
+      decisionCount: decisions.length,
+      decidedCount,
+      validationRate,
+      progress: fa.progressPercentage || 0,
+      trend: fa.confidenceTrend || 'stable' as ConfidenceTrend,
+    }
+  }).sort((a, b) => {
+    // Sort by status priority then confidence
+    const statusOrder: Record<FocusAreaStatus, number> = {
+      validating: 0,
+      active: 1,
+      scaling: 2,
+      achieved: 3,
+      pivoted: 4,
+      paused: 5,
+      archived: 6,
+    }
+    const statusDiff = statusOrder[a.status] - statusOrder[b.status]
+    if (statusDiff !== 0) return statusDiff
+
+    // Then by confidence (low first - needs attention)
+    const confOrder: Record<ConfidenceLevel, number> = { low: 0, medium: 1, high: 2 }
+    return confOrder[a.confidenceLevel] - confOrder[b.confidenceLevel]
+  })
+})
 
 function formatDate(timestamp: { toDate: () => Date } | null) {
   if (!timestamp) return ''
@@ -450,6 +531,96 @@ function formatDate(timestamp: { toDate: () => Date } | null) {
             {{ deliveryStore.openBlockers.length }}
           </div>
         </RouterLink>
+      </div>
+
+      <!-- Strategic Bets Panel - Executive View of Focus Areas -->
+      <div v-if="authStore.canViewTeamContent && strategicBets.length > 0" class="card p-4">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            <h3 class="text-sm font-medium text-gray-900">Strategic Bets</h3>
+          </div>
+          <RouterLink to="/focus-areas" class="text-xs text-accent-600 hover:text-accent-700">
+            View all
+          </RouterLink>
+        </div>
+
+        <div class="space-y-4">
+          <div
+            v-for="bet in strategicBets.slice(0, 5)"
+            :key="bet.id"
+            class="border border-gray-200 rounded-lg p-3 hover:border-gray-300 transition-colors"
+          >
+            <div class="flex items-start justify-between gap-3 mb-2">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <RouterLink
+                    :to="`/focus-areas`"
+                    class="text-sm font-medium text-gray-900 hover:text-indigo-600 truncate"
+                  >
+                    {{ bet.title }}
+                  </RouterLink>
+                  <span :class="[getStatusBadgeClass(bet.status), 'px-2 py-0.5 text-xs font-medium rounded-full capitalize']">
+                    {{ bet.status }}
+                  </span>
+                </div>
+                <p class="text-xs text-gray-500 line-clamp-1">{{ bet.problemStatement }}</p>
+              </div>
+              <div class="flex items-center gap-1">
+                <span :class="[getTrendIcon(bet.trend).class, 'text-sm font-medium']">
+                  {{ getTrendIcon(bet.trend).icon }}
+                </span>
+                <span :class="getConfidenceBadgeClass(bet.confidenceLevel)">
+                  {{ bet.confidenceLevel }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="mb-2">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="text-gray-500">Progress</span>
+                <span class="font-medium text-gray-700">{{ bet.progress }}%</span>
+              </div>
+              <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  class="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                  :style="{ width: `${bet.progress}%` }"
+                ></div>
+              </div>
+            </div>
+
+            <!-- Metrics Row -->
+            <div class="flex items-center gap-4 text-xs">
+              <div class="flex items-center gap-1">
+                <span class="text-gray-400">Hypotheses:</span>
+                <span class="font-medium text-gray-700">{{ bet.hypothesisCount }}</span>
+                <span v-if="bet.validatedCount > 0" class="text-green-600">({{ bet.validatedCount }} ✓)</span>
+              </div>
+              <div v-if="bet.validationRate !== null" class="flex items-center gap-1">
+                <span class="text-gray-400">Val Rate:</span>
+                <span :class="[bet.validationRate >= 50 ? 'text-green-600' : 'text-amber-600', 'font-medium']">
+                  {{ bet.validationRate }}%
+                </span>
+              </div>
+              <div v-if="bet.decisionCount > 0" class="flex items-center gap-1">
+                <span class="text-gray-400">Decisions:</span>
+                <span class="font-medium text-gray-700">{{ bet.decidedCount }}/{{ bet.decisionCount }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Summary Row -->
+        <div class="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+          <span>{{ strategicBets.length }} active strategic bets</span>
+          <span>
+            {{ strategicBets.filter(b => b.confidenceLevel === 'high').length }} high confidence,
+            {{ strategicBets.filter(b => b.confidenceLevel === 'low').length }} need attention
+          </span>
+        </div>
       </div>
 
       <!-- Quick links -->

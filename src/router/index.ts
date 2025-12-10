@@ -102,6 +102,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/DesignPartnersView.vue'),
         meta: { title: 'Design Partners', roles: ['cpo', 'team'] },
       },
+      {
+        path: 'executive-dashboard',
+        name: 'ExecutiveDashboard',
+        component: () => import('@/views/ExecutiveDashboardView.vue'),
+        meta: { title: 'Executive Dashboard', roles: ['cpo', 'leadership'] },
+      },
     ],
   },
   {
