@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { SectionConfig } from '@/views/StrategicContextView.vue'
+import { useMarkdown } from '@/composables/useMarkdown'
 
-defineProps<{
+const props = defineProps<{
   section: SectionConfig
   isExpanded: boolean
   isEditing: boolean
@@ -21,6 +23,12 @@ const emit = defineEmits<{
   enrich: []
   'update:editContent': [value: string]
 }>()
+
+const { renderMarkdown } = useMarkdown()
+
+const renderedContent = computed(() => {
+  return renderMarkdown(props.content)
+})
 
 function handleContentChange(event: Event) {
   emit('update:editContent', (event.target as HTMLTextAreaElement).value)
@@ -189,10 +197,9 @@ function handleContentChange(event: Event) {
         <div v-else>
           <div
             v-if="content"
-            class="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap leading-relaxed"
-          >
-            {{ content }}
-          </div>
+            class="prose prose-sm max-w-none text-gray-700 leading-relaxed"
+            v-html="renderedContent"
+          />
           <p v-else class="text-sm text-gray-400 italic">
             No content yet. Click "Enrich with AI" to generate or "Edit" to add manually.
           </p>
